@@ -1,0 +1,314 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                 String            @id @default(cuid())
+  email              String            @unique
+  displayName        String            @map("display_name")
+  passwordHash       String            @map("password_hash")
+  team               String
+  createdAt          DateTime          @default(now()) @map("created_at")
+  categories         Category[]
+  clients            Client[]
+  projects           Project[]
+  ownedTasks         Task[]            @relation("TaskOwner")
+  taskMembers        TaskMember[]
+  invitedTaskMembers TaskMember[]      @relation("TaskMemberInviter")
+  sentTaskInvites    TaskInvite[]      @relation("TaskInviteSender")
+  receivedTaskInvites TaskInvite[]     @relation("TaskInviteRecipient")
+  trackingPresence   TrackingPresence?
+  sessions           AuthSession[]
+  entries            TimeEntry[]
+  entryAuditEvents   EntryAuditEvent[]
+  settings           Settings?
+  nudges             BreezyNudge[]
+  breezyDays         BreezyDay[]
+  medals             UserMedal[]
+  exports            Export[]
+
+  @@map("users")
+}
+
+model AuthSession {
+  id         String    @id
+  userId     String    @map("user_id")
+  user       User      @relation(fields: [userId], references: [id])
+  tokenHash  String    @unique @map("token_hash")
+  expiresAt  DateTime  @map("expires_at")
+  revokedAt  DateTime? @map("revoked_at")
+  lastSeenAt DateTime? @map("last_seen_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  @@index([userId, revokedAt, expiresAt], map: "idx_auth_sessions_user_active")
+  @@map("auth_sessions")
+}
+
+model Category {
+  id      String  @id @default(cuid())
+  ownerId String? @map("owner_id")
+  owner   User?   @relation(fields: [ownerId], references: [id])
+  name    String
+  tasks   Task[]
+
+  @@map("categories")
+}
+
+model Client {
+  id              String    @id @default(cuid())
+  name            String
+  createdByUserId String    @map("created_by_user_id")
+  createdBy       User      @relation(fields: [createdByUserId], references: [id])
+  createdAt       DateTime  @default(now()) @map("created_at")
+  projects        Project[]
+  tasks           Task[]
+
+  @@map("clients")
+}
+
+model Project {
+  id              String   @id @default(cuid())
+  clientId        String   @map("client_id")
+  client          Client   @relation(fields: [clientId], references: [id])
+  name            String
+  description     String
+  createdByUserId String   @map("created_by_user_id")
+  createdBy       User     @relation(fields: [createdByUserId], references: [id])
+  createdAt       DateTime @default(now()) @map("created_at")
+  tasks           Task[]
+
+  @@map("projects")
+}
+
+model Task {
+  id              String      @id @default(cuid())
+  title           String
+  description     String
+  categoryId      String      @map("category_id")
+  category        Category    @relation(fields: [categoryId], references: [id])
+  clientId        String?     @map("client_id")
+  client          Client?     @relation(fields: [clientId], references: [id])
+  projectId       String?     @map("project_id")
+  project         Project?    @relation(fields: [projectId], references: [id])
+  estimateMinutes Int?        @map("estimate_minutes")
+  ownerId         String      @map("owner_id")
+  owner           User        @relation("TaskOwner", fields: [ownerId], references: [id])
+  isShared        Boolean     @default(false) @map("is_shared")
+  isArchived      Boolean     @default(false) @map("is_archived")
+  createdAt       DateTime    @default(now()) @map("created_at")
+  members         TaskMember[]
+  invites         TaskInvite[]
+  entries         TimeEntry[]
+  trackingPresence TrackingPresence[]
+
+  @@map("tasks")
+}
+
+model TaskMember {
+  taskId          String   @map("task_id")
+  userId          String   @map("user_id")
+  role            String   @default("member")
+  invitedByUserId String?  @map("invited_by_user_id")
+  joinedAt        DateTime @default(now()) @map("joined_at")
+  task            Task     @relation(fields: [taskId], references: [id])
+  user            User     @relation(fields: [userId], references: [id])
+  invitedBy       User?    @relation("TaskMemberInviter", fields: [invitedByUserId], references: [id])
+
+  @@id([taskId, userId])
+  @@index([userId], map: "idx_task_members_user")
+  @@map("task_members")
+}
+
+model TaskInvite {
+  id          String    @id @default(cuid())
+  taskId      String    @map("task_id")
+  task        Task      @relation(fields: [taskId], references: [id])
+  senderId    String    @map("sender_id")
+  sender      User      @relation("TaskInviteSender", fields: [senderId], references: [id])
+  recipientId String    @map("recipient_id")
+  recipient   User      @relation("TaskInviteRecipient", fields: [recipientId], references: [id])
+  status      String    @default("pending")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  respondedAt DateTime? @map("responded_at")
+
+  @@index([senderId], map: "idx_task_invites_sender")
+  @@index([recipientId, status], map: "idx_task_invites_recipient_status")
+  @@index([taskId, recipientId, status], map: "idx_task_invites_task_recipient_status")
+  @@map("task_invites")
+}
+
+model TimeEntry {
+  id              String          @id @default(cuid())
+  taskId          String          @map("task_id")
+  task            Task            @relation(fields: [taskId], references: [id])
+  userId          String          @map("user_id")
+  user            User            @relation(fields: [userId], references: [id])
+  startedAt       DateTime        @map("started_at")
+  endedAt         DateTime?       @map("ended_at")
+  durationSeconds Int             @map("duration_seconds")
+  isManual        Boolean         @default(false) @map("is_manual")
+  idleSeconds     Int             @default(0) @map("idle_seconds")
+  contextSwitches Int             @default(0) @map("context_switches")
+  locationLabel   String?         @map("location_label")
+  createdAt       DateTime        @default(now()) @map("created_at")
+  updatedAt       DateTime        @updatedAt @map("updated_at")
+  isEdited        Boolean         @default(false) @map("is_edited")
+  pauses          EntryPause[]
+  feedback        EntryFeedback?
+  blockers        EntryBlocker[]
+  nudges          BreezyNudge[]
+  trackingPresence TrackingPresence?
+  auditEvents     EntryAuditEvent[]
+
+  @@index([userId, startedAt], map: "idx_time_entries_user_started")
+  @@index([taskId], map: "idx_time_entries_task")
+  @@index([userId, endedAt], map: "idx_time_entries_user_ended")
+  @@map("time_entries")
+}
+
+model TrackingPresence {
+  userId    String    @id @map("user_id")
+  user      User      @relation(fields: [userId], references: [id])
+  taskId    String    @map("task_id")
+  task      Task      @relation(fields: [taskId], references: [id])
+  entryId   String    @unique @map("entry_id")
+  entry     TimeEntry @relation(fields: [entryId], references: [id])
+  startedAt DateTime  @map("started_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+
+  @@index([taskId], map: "idx_tracking_presence_task")
+  @@map("tracking_presence")
+}
+
+model EntryPause {
+  id              String    @id @default(cuid())
+  entryId         String    @map("entry_id")
+  entry           TimeEntry @relation(fields: [entryId], references: [id])
+  startedAt       DateTime  @map("started_at")
+  endedAt         DateTime  @map("ended_at")
+  durationSeconds Int       @map("duration_seconds")
+
+  @@map("entry_pauses")
+}
+
+model EntryFeedback {
+  entryId        String    @id @map("entry_id")
+  entry          TimeEntry @relation(fields: [entryId], references: [id])
+  flowQuality    String    @map("flow_quality")
+  efficiencyFeel String    @map("efficiency_feel")
+  energy         String
+  note           String?
+
+  @@map("entry_feedback")
+}
+
+model Blocker {
+  id        String         @id @default(cuid())
+  name      String         @unique
+  isDefault Boolean        @default(true) @map("is_default")
+  entries   EntryBlocker[]
+
+  @@map("blockers")
+}
+
+model EntryBlocker {
+  entryId   String    @map("entry_id")
+  blockerId String    @map("blocker_id")
+  entry     TimeEntry @relation(fields: [entryId], references: [id])
+  blocker   Blocker   @relation(fields: [blockerId], references: [id])
+
+  @@id([entryId, blockerId])
+  @@map("entry_blockers")
+}
+
+model Settings {
+  userId                 String  @id @map("user_id")
+  user                   User    @relation(fields: [userId], references: [id])
+  idleThresholdMinutes   Int     @default(5) @map("idle_threshold_minutes")
+  nudgeCadenceMinutes    Int     @default(90) @map("nudge_cadence_minutes")
+  breezyVerbosity        String  @default("gentle") @map("breezy_verbosity")
+  muted                  Boolean @default(false)
+  locationEnabled        Boolean @default(false) @map("location_enabled")
+  activityEnabled        Boolean @default(true) @map("activity_enabled")
+  locationLabels         Json    @map("location_labels")
+
+  @@map("settings")
+}
+
+model EntryAuditEvent {
+  id        String    @id @default(cuid())
+  entryId   String    @map("entry_id")
+  entry     TimeEntry @relation(fields: [entryId], references: [id])
+  userId    String    @map("user_id")
+  user      User      @relation(fields: [userId], references: [id])
+  eventType String    @map("event_type")
+  changes   Json?
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  @@index([entryId, createdAt], map: "idx_entry_audit_events_entry_created")
+  @@index([userId, createdAt], map: "idx_entry_audit_events_user_created")
+  @@map("entry_audit_events")
+}
+
+model BreezyNudge {
+  id             String     @id @default(cuid())
+  userId         String     @map("user_id")
+  user           User       @relation(fields: [userId], references: [id])
+  relatedEntryId String?    @map("related_entry_id")
+  relatedEntry   TimeEntry? @relation(fields: [relatedEntryId], references: [id])
+  type           String
+  message        String
+  shownAt        DateTime   @default(now()) @map("shown_at")
+  acknowledgedAt DateTime?  @map("acknowledged_at")
+
+  @@map("breezy_nudges")
+}
+
+model BreezyDay {
+  userId          String   @map("user_id")
+  user            User     @relation(fields: [userId], references: [id])
+  date            DateTime @db.Date
+  breezyMood      String   @map("breezy_mood")
+  airClarityScore Int      @map("air_clarity_score")
+
+  @@id([userId, date])
+  @@map("breezy_days")
+}
+
+model Medal {
+  id          String      @id @default(cuid())
+  code        String      @unique
+  name        String
+  description String
+  users       UserMedal[]
+
+  @@map("medals")
+}
+
+model UserMedal {
+  userId    String   @map("user_id")
+  medalId   String   @map("medal_id")
+  user      User     @relation(fields: [userId], references: [id])
+  medal     Medal    @relation(fields: [medalId], references: [id])
+  awardedAt DateTime @default(now()) @map("awarded_at")
+
+  @@id([userId, medalId])
+  @@map("user_medals")
+}
+
+model Export {
+  id         String   @id @default(cuid())
+  userId     String   @map("user_id")
+  user       User     @relation(fields: [userId], references: [id])
+  format     String
+  dateFrom   DateTime? @map("date_from")
+  dateTo     DateTime? @map("date_to")
+  exportedAt DateTime @default(now()) @map("exported_at")
+
+  @@map("exports")
+}

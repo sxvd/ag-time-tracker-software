@@ -1,0 +1,46 @@
+services:
+  web:
+    build:
+      context: .
+      target: runner
+    image: ag-time-tracker:${IMAGE_TAG:-local}
+    container_name: aq-time-tracker
+    restart: unless-stopped
+    env_file:
+      - .env.production
+    environment:
+      NODE_ENV: production
+      NITRO_HOST: 0.0.0.0
+      PORT: 5300
+      NUXT_APP_BASE_URL: /aq-time-tracker/
+    ports:
+      - "5300:5300"
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:5300/api/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      default:
+      app-network:
+        aliases:
+          - aq-time-tracker
+
+  migrate:
+    build:
+      context: .
+      target: runner
+    image: ag-time-tracker:${IMAGE_TAG:-local}
+    env_file:
+      - .env.production
+    environment:
+      NODE_ENV: production
+    command: ["npx", "prisma", "migrate", "deploy", "--schema=backend/prisma/schema.prisma"]
+    profiles:
+      - tools
+
+networks:
+  app-network:
+    external: true
+    name: app-network

@@ -1,0 +1,64 @@
+services:
+  postgres:
+    image: postgres:16-bookworm
+    container_name: ag-time-tracker-postgres-dev
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-ag_time_tracker}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-postgres} -d $${POSTGRES_DB:-ag_time_tracker}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  web:
+    build:
+      context: .
+      target: dev
+    container_name: ag-time-tracker-web-dev
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-ag_time_tracker}?schema=public
+      NUXT_SESSION_PASSWORD: ${NUXT_SESSION_PASSWORD:-local-docker-session-secret-32-characters}
+      NUXT_AI_INSIGHTS_API_KEY: ${NUXT_AI_INSIGHTS_API_KEY:-}
+      NITRO_HOST: 0.0.0.0
+      PORT: 3000
+      NUXT_APP_BASE_URL: /
+    ports:
+      - "3000:3000"
+    volumes:
+      - .:/app
+      - node_modules:/app/node_modules
+      - nuxt_cache:/app/.nuxt
+    command: >
+      sh -c "npx prisma migrate deploy --schema=backend/prisma/schema.prisma
+      && npm run dev -- --host 0.0.0.0"
+
+  test:
+    build:
+      context: .
+      target: test
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-ag_time_tracker}?schema=public
+      NUXT_SESSION_PASSWORD: ${NUXT_SESSION_PASSWORD:-local-docker-session-secret-32-characters}
+      NUXT_AI_INSIGHTS_API_KEY: ${NUXT_AI_INSIGHTS_API_KEY:-}
+      NUXT_APP_BASE_URL: /
+    command: >
+      sh -c "npx prisma migrate deploy --schema=backend/prisma/schema.prisma
+      && npm run test"
+
+volumes:
+  postgres_data:
+  node_modules:
+  nuxt_cache:

@@ -1,0 +1,674 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Breezy - Time Tracking Preview</title>
+  <style>
+    :root {
+      --bg: #f3f8fb;
+      --panel: #ffffff;
+      --ink: #182336;
+      --muted: #687589;
+      --line: #d8e5ed;
+      --sky: #dff4ff;
+      --sky-line: #a9d9f0;
+      --blue: #1C75BC;
+      --blue-2: #1499cf;
+      --teal: #19a891;
+      --green: #45b979;
+      --gold: #e5a844;
+      --coral: #d57b61;
+      --nav: #eef5fa;
+      font-family: Catamaran, Cabin, Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: var(--ink);
+      background: var(--bg);
+    }
+
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; background: var(--bg); }
+    button, input, select, textarea { font: inherit; }
+    button { border: 0; cursor: pointer; }
+    input, select, textarea {
+      width: 100%;
+      border: 1px solid #d5e3ec;
+      border-radius: 8px;
+      background: #fff;
+      color: var(--ink);
+      padding: 0.68rem 0.78rem;
+    }
+
+    .shell { width: min(1390px, calc(100vw - 32px)); margin: 0 auto; padding-bottom: 38px; }
+    .app-navbar {
+      display: grid;
+      grid-template-columns: minmax(260px, 1fr) minmax(520px, auto);
+      gap: 20px;
+      align-items: center;
+      min-height: 92px;
+      border: 1px solid var(--sky-line);
+      border-top: 0;
+      border-radius: 0 0 16px 16px;
+      background: var(--sky);
+      padding: 16px 26px;
+    }
+
+    .brand-lockup, .account-copy, .controls, .session-signals, .legend-items, .export-actions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .eyebrow {
+      margin: 0;
+      color: var(--blue);
+      font-size: 0.78rem;
+      font-weight: 900;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+
+    .brand-lockup h1, .section-hero h2 {
+      margin: 0;
+      letter-spacing: 0;
+    }
+
+    .brand-lockup h1 {
+      font-family: Georgia, "Times New Roman", serif;
+      color: #0876ac;
+      font-size: 30px;
+      font-weight: 500;
+    }
+
+    .breezy-crop, .account-avatar, .breezy-road-face {
+      display: inline-block;
+      border-radius: 50%;
+      flex: 0 0 auto;
+    }
+
+    .breezy-crop {
+      width: 54px;
+      height: 54px;
+      border: 3px solid #fff;
+      background: #fff url("public/breezy-main.png") center / cover no-repeat;
+      box-shadow: 0 8px 18px rgb(10 81 117 / 15%);
+    }
+
+    .account-bar {
+      display: grid;
+      grid-template-columns: minmax(190px, 1.1fr) minmax(180px, 0.9fr) minmax(130px, 0.65fr) auto;
+      gap: 10px;
+      align-items: center;
+      justify-self: end;
+    }
+
+    .account-avatar {
+      display: grid;
+      place-items: center;
+      width: 42px;
+      height: 42px;
+      background: #279fda;
+      color: #fff;
+      font-weight: 900;
+    }
+
+    .account-copy strong, .account-copy small { display: block; }
+    .account-copy small { color: #405066; font-size: 0.82rem; font-weight: 700; }
+
+    .primary-button, .controls button, .export-actions a {
+      border-radius: 8px;
+      background: var(--blue);
+      color: #fff;
+      font-weight: 900;
+      padding: 0.72rem 1rem;
+      text-decoration: none;
+    }
+
+    .nav-stack { display: grid; justify-items: end; gap: 12px; margin: 18px 0; }
+    .audience-toggle, .section-tabs, .mini-toggle, .road-tabs {
+      display: inline-grid;
+      gap: 5px;
+      border-radius: 8px;
+      background: var(--nav);
+      padding: 5px;
+    }
+    .audience-toggle { grid-template-columns: 1fr 1fr; min-width: 260px; }
+    .section-tabs { grid-template-columns: repeat(3, auto); }
+    .mini-toggle { grid-template-columns: repeat(2, auto); }
+    .audience-toggle button, .section-tabs button, .mini-toggle button {
+      border-radius: 7px;
+      background: transparent;
+      color: var(--muted);
+      font-weight: 900;
+      padding: 0.7rem 1rem;
+    }
+    .audience-toggle .selected, .section-tabs .active, .mini-toggle .selected {
+      background: #fff;
+      color: var(--ink);
+      box-shadow: 0 1px 6px rgb(17 38 60 / 6%);
+    }
+
+    .section-hero {
+      display: flex;
+      justify-content: space-between;
+      gap: 18px;
+      align-items: center;
+      margin-bottom: 18px;
+    }
+    .section-hero h2 { font-size: clamp(1.7rem, 3vw, 2.4rem); }
+    .timer-pill {
+      display: grid;
+      min-width: 190px;
+      border: 1px solid #d4e0e8;
+      border-radius: 8px;
+      background: #fff;
+      padding: 12px 16px;
+      box-shadow: 0 1px 3px rgb(24 35 54 / 4%);
+    }
+    .timer-pill span { font-size: 1.5rem; font-weight: 900; }
+
+    .view { display: none; }
+    .view.active { display: block; }
+    .workbench {
+      display: grid;
+      grid-template-columns: minmax(0, 1.1fr) minmax(360px, 0.9fr);
+      gap: 0;
+      position: relative;
+      overflow: hidden;
+      border: 1px solid var(--sky-line);
+      border-radius: 8px;
+      background: linear-gradient(135deg, rgb(255 255 255 / 88%), rgb(212 236 255 / 92%));
+      box-shadow: 0 1px 3px rgb(24 35 54 / 4%);
+    }
+    .workbench::after {
+      content: "";
+      position: absolute;
+      right: -9%;
+      top: -18%;
+      width: 45%;
+      height: 140%;
+      background: linear-gradient(180deg, rgb(69 185 121 / 14%), rgb(20 153 207 / 5%));
+      transform: skewX(-10deg);
+      pointer-events: none;
+    }
+    .timer-card { position: relative; z-index: 1; padding: 28px; }
+    .stage-label, .card-head, .journey-toolbar, .legend {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+    }
+    .stage-label { margin-bottom: 18px; border-bottom: 1px solid rgb(112 130 150 / 18%); padding-bottom: 14px; }
+    .stage-label span { color: var(--blue); font-weight: 900; text-transform: uppercase; }
+    .task-row, .quick-grid, .dashboard { display: grid; gap: 16px; }
+    .task-row { grid-template-columns: 1fr 220px; }
+    label { display: grid; gap: 0.32rem; font-weight: 800; }
+    .timer-face { display: grid; gap: 8px; margin: 26px 0; }
+    .timer-face span { font-size: clamp(3.3rem, 9vw, 7rem); font-weight: 900; line-height: 0.92; }
+    .timer-face small { max-width: 620px; color: #17486e; font-size: 1.05rem; font-weight: 900; }
+    .controls .ghost { background: #d4ecff; color: #17486e; }
+    .controls .danger { background: #212121; }
+    .session-signals span {
+      border-radius: 999px;
+      background: #d4ecff;
+      color: #17486e;
+      font-weight: 900;
+      padding: 0.35rem 0.65rem;
+    }
+
+    .breezy-panel {
+      position: relative;
+      z-index: 1;
+      display: grid;
+      align-content: center;
+      justify-items: center;
+      min-height: 430px;
+      padding: 28px 28px 28px 0;
+      text-align: center;
+    }
+    .breezy-panel::before {
+      content: "";
+      position: absolute;
+      inset: 42px 28px 42px 0;
+      z-index: -1;
+      border-radius: 8px;
+      background: rgb(255 255 255 / 48%);
+    }
+    .breezy-photo {
+      width: min(350px, 72vw);
+      height: min(350px, 72vw);
+      overflow: hidden;
+      border-radius: 50%;
+      background: #fff;
+      box-shadow: 0 10px 24px rgb(10 81 117 / 16%);
+    }
+    .breezy-photo img { width: 100%; height: 100%; object-fit: cover; }
+    .breezy-message { margin: 0.25rem 0 0; max-width: 340px; font-size: 1.32rem; font-weight: 900; }
+
+    .quick-grid { grid-template-columns: 1fr 1fr 1.25fr; margin-top: 18px; }
+    .panel, .metric, .forest-card {
+      border: 1px solid #d4e0e8;
+      border-radius: 8px;
+      background: var(--panel);
+      box-shadow: 0 1px 3px rgb(24 35 54 / 4%);
+      padding: 20px;
+    }
+    .panel h2, .card-title h3 { margin: 0 0 10px; font-size: 1.12rem; }
+    .card-title p, .card-head.compact p { margin: 0; color: var(--muted); font-size: 0.9rem; font-weight: 700; }
+    .panel form, .panel { display: grid; gap: 12px; }
+    .inline-fields { display: flex; gap: 10px; }
+    .check { display: flex; gap: 8px; align-items: center; }
+    .check input { width: auto; }
+    .session-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto auto;
+      gap: 10px;
+      align-items: center;
+      border-top: 1px solid #e2f1ff;
+      padding: 10px 0;
+    }
+    .session-row small { color: var(--muted); font-weight: 800; }
+
+    .dashboard { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    .metric span { color: var(--muted); font-weight: 900; }
+    .metric strong { display: block; margin-top: 4px; font-size: 2rem; }
+    .wide { grid-column: span 2; }
+    .chart-placeholder {
+      display: grid;
+      align-items: end;
+      grid-template-columns: repeat(6, 1fr);
+      gap: 10px;
+      height: 220px;
+      border-radius: 8px;
+      background: linear-gradient(180deg, #f8fcff, #eef8ff);
+      padding: 18px;
+    }
+    .chart-placeholder i { display: block; border-radius: 8px 8px 0 0; background: var(--blue); }
+
+    .forest-card { overflow: hidden; }
+    .road-tabs { grid-template-columns: repeat(3, auto); }
+    .road-tabs span, .month-pills span, .reward-pill {
+      border-radius: 999px;
+      color: #657285;
+      font-size: 0.86rem;
+      font-weight: 900;
+      padding: 0.55rem 0.85rem;
+    }
+    .road-tabs .selected { background: #fff; color: var(--ink); }
+    .journey-toolbar { margin: 14px 0 16px; }
+    .month-pills { display: flex; flex-wrap: wrap; gap: 8px; }
+    .month-pills span, .reward-pill { border: 1px solid var(--line); background: #f8fcff; }
+    .month-pills .active { border-color: var(--sky-line); background: #e7f7ff; color: #0876ac; }
+    .reward-pill { background: #f1fff7; color: #237d58; white-space: nowrap; }
+    .roadmap {
+      position: relative;
+      min-height: 470px;
+      overflow: hidden;
+      border: 1px solid #cfe2ea;
+      border-radius: 8px;
+      background:
+        linear-gradient(90deg, rgb(20 153 207 / 6%) 0 33.333%, rgb(69 185 121 / 6%) 33.333% 66.666%, rgb(229 168 68 / 7%) 66.666% 100%),
+        linear-gradient(180deg, #eaf9fd 0%, #f9fdff 66%, #ffffff 100%);
+    }
+    .months {
+      position: absolute;
+      left: 48px;
+      right: 48px;
+      top: 25px;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      color: #536073;
+      font-weight: 900;
+      text-align: center;
+    }
+    .months span { border-left: 1px solid rgb(112 130 150 / 18%); }
+    .months span:first-child { border-left: 0; }
+    .sky-strip {
+      position: absolute;
+      left: 56px;
+      right: 56px;
+      top: 58px;
+      display: grid;
+      grid-template-columns: repeat(6, 1fr);
+      gap: 10px;
+    }
+    .sky-day {
+      min-height: 54px;
+      border: 1px solid rgb(167 203 218 / 70%);
+      border-radius: 8px;
+      background: linear-gradient(180deg, #dff5ff 0%, #f8fdff 100%);
+      padding: 10px 12px;
+    }
+    .sky-day.calm { background: linear-gradient(180deg, #e8fff2 0%, #fbfffc 100%); }
+    .sky-day.cloudy { background: linear-gradient(180deg, #edf3f6 0%, #ffffff 100%); }
+    .sky-day strong { display: block; color: #2b546e; font-size: 0.76rem; }
+    .sky-day span { color: #6a7587; font-size: 0.7rem; font-weight: 800; }
+    .road { position: absolute; left: 54px; right: 54px; top: 142px; height: 210px; }
+    .road path.base { fill: none; stroke: #bfd3dd; stroke-width: 30; stroke-linecap: round; stroke-linejoin: round; }
+    .road path.center { fill: none; stroke: #fff; stroke-width: 2; stroke-dasharray: 12 18; stroke-linecap: round; opacity: .95; }
+    .marker { position: absolute; width: 142px; transform: translate(-50%, -50%); text-align: center; }
+    .pin { position: relative; width: 62px; height: 62px; margin: 0 auto; display: block; border-radius: 50%; background: transparent; }
+    .pin::before { content: ""; position: absolute; left: 50%; top: 52px; width: 2px; height: 38px; background: var(--line); transform: translateX(-50%); }
+    .breezy-road-face {
+      position: absolute;
+      inset: 5px;
+      border: 4px solid #fff;
+      background: #fff url("public/breezy-main.png") center / cover no-repeat;
+      box-shadow: 0 7px 18px rgb(10 81 117 / 18%);
+    }
+    .flag {
+      position: absolute;
+      left: 50%;
+      top: 86px;
+      z-index: 8;
+      display: grid;
+      width: 178px;
+      border: 1px solid #d4e0e8;
+      border-radius: 8px;
+      background: #fff;
+      box-shadow: 0 8px 20px rgb(30 65 91 / 9%);
+      opacity: 0;
+      pointer-events: none;
+      text-align: left;
+      transform: translate(-50%, 8px) scale(.98);
+      transition: opacity .16s ease, transform .16s ease;
+    }
+    .flag strong { padding: 10px 11px 0; font-size: 0.82rem; }
+    .flag span { padding: 4px 11px 0; color: var(--muted); font-size: 0.76rem; font-weight: 800; }
+    .flag p { margin: 0; padding: 7px 11px 10px; color: #415169; font-size: 0.76rem; line-height: 1.35; }
+    .marker:hover, .marker:focus-within { z-index: 12; }
+    .marker:hover .flag, .marker:focus-within .flag { opacity: 1; pointer-events: auto; transform: translate(-50%, 0) scale(1); }
+    .m1 { left: 9%; top: 68%; } .m2 { left: 18%; top: 42%; } .m3 { left: 27%; top: 58%; }
+    .m4 { left: 36%; top: 35%; } .m5 { left: 45%; top: 57%; } .m6 { left: 54%; top: 44%; }
+    .m7 { left: 63%; top: 66%; } .m8 { left: 72%; top: 39%; } .m9 { left: 81%; top: 55%; } .m10 { left: 90%; top: 36%; }
+    .week-row {
+      position: absolute;
+      left: 76px;
+      right: 76px;
+      bottom: 36px;
+      display: grid;
+      grid-template-columns: repeat(12, 1fr);
+      color: #7b8798;
+      font-size: 0.76rem;
+      font-weight: 800;
+      text-align: center;
+    }
+    .week-row span { position: relative; }
+    .week-row span::before { content: ""; position: absolute; left: 50%; top: -18px; width: 7px; height: 7px; border-radius: 50%; background: #aec1cd; transform: translateX(-50%); }
+    .legend { margin-top: 18px; color: var(--muted); font-size: 0.88rem; font-weight: 700; }
+    .legend-item { display: inline-flex; align-items: center; gap: 8px; }
+    .dot { width: 12px; height: 12px; border-radius: 50%; background: var(--blue-2); }
+    .dot.teal { background: var(--teal); } .dot.gold { background: var(--gold); } .dot.coral { background: var(--coral); }
+
+    @media (max-width: 1100px) {
+      .app-navbar, .account-bar, .workbench, .quick-grid, .dashboard { grid-template-columns: 1fr; }
+      .account-bar { justify-self: stretch; }
+      .nav-stack { justify-items: stretch; }
+      .audience-toggle, .section-tabs { width: 100%; }
+      .wide { grid-column: auto; }
+      .roadmap { min-width: 900px; }
+      .forest-card { overflow-x: auto; }
+    }
+    @media (max-width: 720px) {
+      .shell { width: min(100vw - 18px, 1390px); }
+      .section-hero, .stage-label, .card-head, .journey-toolbar, .legend { align-items: stretch; flex-direction: column; }
+      .task-row, .session-row { grid-template-columns: 1fr; }
+      .section-tabs { grid-template-columns: 1fr; }
+      .breezy-panel { order: -1; min-height: 280px; padding: 14px 22px 0; }
+      .breezy-photo { width: min(260px, 72vw); height: min(260px, 72vw); }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="app-navbar">
+      <div class="brand-lockup">
+        <span class="breezy-crop" aria-hidden="true"></span>
+        <div>
+          <p class="eyebrow">AirGradient Time Tracker</p>
+          <h1>Breezy</h1>
+        </div>
+      </div>
+      <form class="account-bar">
+        <div class="account-copy">
+          <span class="account-avatar">MC</span>
+          <div>
+            <strong>Maya Chen</strong>
+            <small>maya@airgradient.com - Software</small>
+          </div>
+        </div>
+        <input value="maya@airgradient.com" aria-label="Email">
+        <input value="demo" aria-label="Password" type="password">
+        <button class="primary-button" type="button">Sign in</button>
+      </form>
+    </header>
+
+    <section class="nav-stack">
+      <div class="audience-toggle">
+        <button class="selected" data-audience="you" type="button">You</button>
+        <button data-audience="company" type="button">Company</button>
+      </div>
+      <nav class="section-tabs">
+        <button class="active" data-view="track" type="button">Track</button>
+        <button data-view="dashboard" type="button">Dashboard</button>
+        <button data-view="journey" type="button">Breezy Journey</button>
+      </nav>
+    </section>
+
+    <section class="section-hero">
+      <div>
+        <p class="eyebrow" id="scopeLabel">Personal - private</p>
+        <h2 id="heroTitle">Track</h2>
+      </div>
+      <div class="timer-pill">
+        <span id="smallTimer">00:00:00</span>
+        <strong>Breezy: sleepy</strong>
+      </div>
+    </section>
+
+    <section id="track" class="view active">
+      <div class="workbench">
+        <article class="timer-card">
+          <div class="stage-label"><span>Today</span><strong>Ready to focus</strong></div>
+          <div class="task-row">
+            <label>Task
+              <select><option>Deep work: PCB layout review</option><option>Weekly process retro</option></select>
+            </label>
+            <label>Category
+              <select><option>Deep work</option><option>Meeting</option><option>Research</option></select>
+            </label>
+          </div>
+          <div class="timer-face">
+            <span id="timer">00:00:00</span>
+            <small id="breezyLine">Start your first task. Breezy is ready when you are.</small>
+          </div>
+          <div class="controls">
+            <button id="startBtn" type="button">Start</button>
+            <button class="ghost" type="button">Pause</button>
+            <button class="ghost" type="button">Resume</button>
+            <button class="danger" type="button">Stop</button>
+            <button class="ghost" type="button">Take a Break</button>
+          </div>
+          <div class="session-signals">
+            <span>Idle 0m</span>
+            <span>0 context switches counted</span>
+          </div>
+        </article>
+        <article class="breezy-panel">
+          <div class="breezy-photo"><img src="public/breezy-main.png" alt="Breezy"></div>
+          <div>
+            <p class="eyebrow">Breezy: sleepy</p>
+            <p class="breezy-message">Start your first task. Breezy is ready when you are.</p>
+          </div>
+        </article>
+      </div>
+
+      <section class="quick-grid">
+        <form class="panel">
+          <h2>Create task</h2>
+          <input placeholder="Task title" value="Sensor QA notes">
+          <textarea rows="2" placeholder="Description">Consolidate firmware validation notes.</textarea>
+          <div class="inline-fields">
+            <select><option>Deep work</option><option>Meeting</option><option>Research</option></select>
+            <input type="number" value="60">
+          </div>
+          <label class="check"><input type="checkbox" checked> Shared task</label>
+          <button class="primary-button" type="button">Add task</button>
+        </form>
+
+        <form class="panel">
+          <h2>Retroactive entry</h2>
+          <select><option>Deep work: PCB layout review</option></select>
+          <input type="datetime-local">
+          <input type="datetime-local">
+          <button class="primary-button" type="button">Add manual entry</button>
+        </form>
+
+        <article class="panel">
+          <div class="card-head compact">
+            <div>
+              <h2>Today's entries</h2>
+              <p id="entryNote">Your tracked sessions</p>
+            </div>
+            <div class="mini-toggle">
+              <button class="selected" data-entry="individual" type="button">Individual</button>
+              <button data-entry="team" type="button">Team</button>
+            </div>
+          </div>
+          <div id="entries">
+            <div class="session-row"><strong>Deep work: PCB layout review</strong><span>01:19:00</span><small>Great flow</small></div>
+            <div class="session-row"><strong>Weekly process retro</strong><span>00:46:00</span><small>Friction</small></div>
+          </div>
+        </article>
+      </section>
+    </section>
+
+    <section id="dashboard" class="view dashboard">
+      <article class="metric"><span>Your hours</span><strong>9.8h</strong></article>
+      <article class="metric"><span>Great flow</span><strong>4</strong></article>
+      <article class="metric"><span>Top blocker</span><strong>Context switching</strong></article>
+      <article class="metric"><span>Raw data</span><div class="export-actions"><a href="#">CSV</a><a href="#">JSON</a></div></article>
+      <article class="wide panel">
+        <h2>Hours by category</h2>
+        <div class="chart-placeholder">
+          <i style="height: 84%"></i><i style="height: 42%"></i><i style="height: 61%"></i><i style="height: 35%"></i><i style="height: 55%"></i><i style="height: 25%"></i>
+        </div>
+      </article>
+      <article class="panel">
+        <h2>Estimate vs actual</h2>
+        <div class="session-row"><strong>PCB layout review</strong><span>79m</span><small>-11m</small></div>
+        <div class="session-row"><strong>Process retro</strong><span>46m</span><small>+1m</small></div>
+      </article>
+      <article class="panel">
+        <h2>AI Insights</h2>
+        <p>Reduce context switching during deep work blocks. The company view stays aggregated.</p>
+        <button class="primary-button" type="button">Personal suggestion</button>
+      </article>
+    </section>
+
+    <section id="journey" class="view forest-card">
+      <div class="card-head">
+        <div class="card-title">
+          <h3>Breezy Journey</h3>
+          <p>A calm look back at weekly Breezy days, moods, and clear-air moments.</p>
+        </div>
+        <div class="road-tabs"><span class="selected">Timeline</span><span>Calendar</span><span>Moods</span></div>
+      </div>
+      <div class="journey-toolbar">
+        <div class="month-pills"><span>March</span><span class="active">April</span><span class="active">May</span><span>June</span></div>
+        <span class="reward-pill">12 Breezy days saved</span>
+      </div>
+      <div class="roadmap">
+        <div class="months"><span>March</span><span>April</span><span>May</span></div>
+        <div class="sky-strip">
+          <div class="sky-day calm"><strong>Calm</strong><span>steady focus</span></div>
+          <div class="sky-day"><strong>Clear</strong><span>deep work</span></div>
+          <div class="sky-day cloudy"><strong>Cloudy</strong><span>small blockers</span></div>
+          <div class="sky-day calm"><strong>Light</strong><span>handoff</span></div>
+          <div class="sky-day"><strong>Bright</strong><span>best day</span></div>
+          <div class="sky-day calm"><strong>Settled</strong><span>rhythm</span></div>
+        </div>
+        <svg class="road" viewBox="0 0 1200 220" preserveAspectRatio="none" aria-hidden="true">
+          <path class="base" d="M18 150 C120 58 196 58 295 126 S480 198 602 120 S782 42 914 108 S1086 178 1182 88"></path>
+          <path class="center" d="M18 150 C120 58 196 58 295 126 S480 198 602 120 S782 42 914 108 S1086 178 1182 88"></path>
+        </svg>
+        <div class="marker m1"><button class="pin"><span class="breezy-road-face"></span></button><div class="flag"><strong>March week 1</strong><span>5.5h - calm</span><p>Air clarity 76 from tracked work and breaks.</p></div></div>
+        <div class="marker m2"><button class="pin"><span class="breezy-road-face"></span></button><div class="flag"><strong>March week 2</strong><span>7.0h - happy</span><p>Clear-air deep work momentum.</p></div></div>
+        <div class="marker m3"><button class="pin"><span class="breezy-road-face"></span></button><div class="flag"><strong>March week 3</strong><span>4.2h - waving</span><p>Small blockers were named honestly.</p></div></div>
+        <div class="marker m4"><button class="pin"><span class="breezy-road-face"></span></button><div class="flag"><strong>April week 1</strong><span>8.4h - cheering</span><p>Breezy's best day this season.</p></div></div>
+        <div class="marker m5"><button class="pin"><span class="breezy-road-face"></span></button><div class="flag"><strong>April week 2</strong><span>3.8h - calm</span><p>Review week with sustainable pace.</p></div></div>
+        <div class="marker m6"><button class="pin"><span class="breezy-road-face"></span></button><div class="flag"><strong>April week 3</strong><span>6.5h - happy</span><p>Several clear-air days in a row.</p></div></div>
+        <div class="marker m7"><button class="pin"><span class="breezy-road-face"></span></button><div class="flag"><strong>May week 1</strong><span>2.6h - sleepy</span><p>A short checkpoint week.</p></div></div>
+        <div class="marker m8"><button class="pin"><span class="breezy-road-face"></span></button><div class="flag"><strong>May week 2</strong><span>7.8h - cheering</span><p>Strong creative momentum.</p></div></div>
+        <div class="marker m9"><button class="pin"><span class="breezy-road-face"></span></button><div class="flag"><strong>May week 3</strong><span>4.7h - waving</span><p>Prepared handoff notes.</p></div></div>
+        <div class="marker m10"><button class="pin"><span class="breezy-road-face"></span></button><div class="flag"><strong>May week 4</strong><span>6.9h - happy</span><p>The season ends calm.</p></div></div>
+        <div class="week-row"><span>W1</span><span>W2</span><span>W3</span><span>W4</span><span>W5</span><span>W6</span><span>W7</span><span>W8</span><span>W9</span><span>W10</span><span>W11</span><span>W12</span></div>
+      </div>
+      <div class="legend">
+        <div class="legend-items">
+          <span class="legend-item"><i class="dot"></i>Deep work</span>
+          <span class="legend-item"><i class="dot teal"></i>Clear air</span>
+          <span class="legend-item"><i class="dot gold"></i>Admin</span>
+          <span class="legend-item"><i class="dot coral"></i>Friction</span>
+        </div>
+        <span>Each Breezy holds a saved task memory</span>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const views = {
+      track: document.getElementById("track"),
+      dashboard: document.getElementById("dashboard"),
+      journey: document.getElementById("journey")
+    };
+    const heroTitle = document.getElementById("heroTitle");
+    const scopeLabel = document.getElementById("scopeLabel");
+    const audienceButtons = document.querySelectorAll("[data-audience]");
+    const viewButtons = document.querySelectorAll("[data-view]");
+    const entryButtons = document.querySelectorAll("[data-entry]");
+    let audience = "you";
+    let seconds = 0;
+    let timerId;
+
+    function showView(name) {
+      Object.entries(views).forEach(([key, el]) => el.classList.toggle("active", key === name));
+      viewButtons.forEach((button) => button.classList.toggle("active", button.dataset.view === name));
+      heroTitle.textContent = name === "journey" ? "Breezy Journey" : name === "dashboard" ? (audience === "you" ? "Your Dashboard" : "Company Dashboard") : "Track";
+      scopeLabel.textContent = audience === "you" ? "Personal - private" : "Aggregated - process";
+    }
+
+    audienceButtons.forEach((button) => {
+      button.addEventListener("click", () => {
+        audience = button.dataset.audience;
+        audienceButtons.forEach((item) => item.classList.toggle("selected", item === button));
+        showView(audience === "company" ? "dashboard" : "track");
+      });
+    });
+
+    viewButtons.forEach((button) => {
+      button.addEventListener("click", () => showView(button.dataset.view));
+    });
+
+    entryButtons.forEach((button) => {
+      button.addEventListener("click", () => {
+        entryButtons.forEach((item) => item.classList.toggle("selected", item === button));
+        document.getElementById("entryNote").textContent = button.dataset.entry === "team" ? "Team sessions without individual ranking" : "Your tracked sessions";
+      });
+    });
+
+    document.getElementById("startBtn").addEventListener("click", () => {
+      if (timerId) return;
+      document.getElementById("breezyLine").textContent = "You are in the zone, keep going.";
+      timerId = setInterval(() => {
+        seconds += 1;
+        const h = String(Math.floor(seconds / 3600)).padStart(2, "0");
+        const m = String(Math.floor((seconds % 3600) / 60)).padStart(2, "0");
+        const s = String(seconds % 60).padStart(2, "0");
+        document.getElementById("timer").textContent = `${h}:${m}:${s}`;
+        document.getElementById("smallTimer").textContent = `${h}:${m}:${s}`;
+      }, 1000);
+    });
+  </script>
+</body>
+</html>
