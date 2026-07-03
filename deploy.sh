@@ -4,7 +4,7 @@ echo "Deployment started at $(date)"
 
 set -euo pipefail
 
-APP_DIR="/opt/apps/aq-time-tracker"
+APP_DIR="/opt/apps/tracker"
 FORCE=false
 
 while [[ "$#" -gt 0 ]]; do
