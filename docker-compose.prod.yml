@@ -32,7 +32,7 @@ services:
       NUXT_AI_INSIGHTS_API_KEY: ${NUXT_AI_INSIGHTS_API_KEY:-}
       NITRO_HOST: 0.0.0.0
       PORT: 5500
-      NUXT_APP_BASE_URL: /aq-time-tracker/
+      NUXT_APP_BASE_URL: /tracker/
     ports:
       - "5500:5500"
     healthcheck:
@@ -45,7 +45,7 @@ services:
       default:
       app-network:
         aliases:
-          - aq-time-tracker
+          - tracker
 
   migrate:
     build:
