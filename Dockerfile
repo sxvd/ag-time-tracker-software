@@ -1,5 +1,9 @@
 FROM node:22-bookworm-slim AS base
 
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends ca-certificates openssl \
+  && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
 FROM base AS deps
@@ -30,7 +34,7 @@ RUN npm run build
 FROM base AS runner
 ENV NODE_ENV=production
 ENV NITRO_HOST=0.0.0.0
-ENV PORT=5300
+ENV PORT=5500
 
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev \
@@ -40,5 +44,5 @@ COPY --from=build /app/.output ./.output
 COPY --from=build /app/backend/prisma ./backend/prisma
 RUN npx prisma generate --schema=backend/prisma/schema.prisma
 
-EXPOSE 5300
+EXPOSE 5500
 CMD ["node", ".output/server/index.mjs"]

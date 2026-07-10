@@ -25,11 +25,11 @@ Recommended deployment defaults for the AirGradient tools host:
 
 - Public path: `https://tools.airgradient.net/aq-time-tracker`
 - Container/network alias: `aq-time-tracker`
-- App port: `5300`
-- Server path: `/opt/apps/aq-time-tracker`
-- Production database: external PostgreSQL through `DATABASE_URL` in `.env.production`
+- App port: `5500`
+- Server path: `/opt/apps/tracker`
+- Production database: PostgreSQL service in `docker-compose.prod.yml`, persisted in the `postgres_data` Docker volume
 
-If AirGradient assigns a different public path, alias, or port, replace all occurrences of `aq-time-tracker` and `5300` in the implementation with the assigned values before deploying.
+If AirGradient assigns a different public path, alias, or port, replace all occurrences of `aq-time-tracker` and `5500` in the implementation with the assigned values before deploying.
 
 ---
 
@@ -150,7 +150,7 @@ RUN npm run build
 FROM base AS runner
 ENV NODE_ENV=production
 ENV NITRO_HOST=0.0.0.0
-ENV PORT=5300
+ENV PORT=5500
 
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev \
@@ -160,7 +160,7 @@ COPY --from=build /app/.output ./.output
 COPY --from=build /app/backend/prisma ./backend/prisma
 RUN npx prisma generate --schema=backend/prisma/schema.prisma
 
-EXPOSE 5300
+EXPOSE 5500
 CMD ["node", ".output/server/index.mjs"]
 ```
 
@@ -240,7 +240,7 @@ POSTGRES_USER="postgres"
 POSTGRES_PASSWORD="postgres"
 
 # Production deployment below https://tools.airgradient.net/aq-time-tracker
-PORT="5300"
+PORT="5500"
 NITRO_HOST="0.0.0.0"
 NUXT_APP_BASE_URL="/aq-time-tracker/"
 ```
@@ -477,12 +477,12 @@ services:
     environment:
       NODE_ENV: production
       NITRO_HOST: 0.0.0.0
-      PORT: 5300
+      PORT: 5500
       NUXT_APP_BASE_URL: /aq-time-tracker/
     ports:
-      - "5300:5300"
+      - "5500:5500"
     healthcheck:
-      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:5300/api/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))\""]
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:5500/api/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))\""]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -561,7 +561,7 @@ echo "Deployment started at $(date)"
 
 set -euo pipefail
 
-APP_DIR="/opt/apps/aq-time-tracker"
+APP_DIR="/opt/apps/tracker"
 FORCE=false
 
 while [[ "$#" -gt 0 ]]; do
@@ -690,18 +690,20 @@ The AirGradient tools host deploys the app below:
 https://tools.airgradient.net/aq-time-tracker
 ```
 
-Production expects `.env.production` on the server with at least:
+Production Compose starts its own PostgreSQL container and keeps data in the `postgres_data` Docker volume. The deploy script creates a server-only `.env.production` with generated secrets on first run.
 
 ```dotenv
-DATABASE_URL="postgresql://user:password@host:5432/ag_time_tracker?schema=public"
+POSTGRES_DB="ag_time_tracker"
+POSTGRES_USER="postgres"
+POSTGRES_PASSWORD="replace-with-a-long-url-safe-secret"
 NUXT_SESSION_PASSWORD="prod-example-session-secret-32-characters"
 NUXT_AI_INSIGHTS_API_KEY=""
-PORT="5300"
+PORT="5500"
 NITRO_HOST="0.0.0.0"
 NUXT_APP_BASE_URL="/aq-time-tracker/"
 ```
 
-Deploy from `/opt/apps/aq-time-tracker`:
+Deploy from `/opt/apps/tracker`:
 
 ```bash
 ./deploy.sh
@@ -830,9 +832,9 @@ Expected: README contains only verified setup information.
 - Do not commit `.env.production`.
 - Do not run `npm run db:seed` automatically in production.
 - Run `docker network ls` on `tools.airgradient.net` and confirm `app-network` exists before first deployment.
-- Confirm the Nginx upstream path on `tools.airgradient.net` proxies `/aq-time-tracker` to `http://aq-time-tracker:5300`.
-- Confirm port `5300` is not already assigned to another installed app before first deployment.
-- Confirm the production `DATABASE_URL` points to the intended PostgreSQL database before running `./deploy.sh`.
+- Confirm the Nginx upstream path on `tools.airgradient.net` proxies `/aq-time-tracker` to `http://aq-time-tracker:5500`.
+- Confirm port `5500` is not already assigned to another installed app before first deployment.
+- Confirm `.env.production` exists or let `deploy.sh` create it before running Docker Compose directly.
 - Keep Prisma migrations in `backend/prisma/migrations` and use a concrete migration name such as `npx prisma migrate dev --schema=backend/prisma/schema.prisma --name add_container_runtime_setting` only when the schema changes.
 
 ## Rollback Notes
@@ -855,4 +857,4 @@ Database migrations are forward-only by default. For a schema-changing release, 
 
 - Spec coverage: The plan covers Docker build context, image build, local development, production Compose, deployment script, base-path support, health endpoint, docs, and verification.
 - Placeholder scan: The plan avoids placeholder tokens and includes concrete file contents, commands, and expected results.
-- Type consistency: The service name `web`, image name `ag-time-tracker`, network alias `aq-time-tracker`, app port `5300`, and base path `/aq-time-tracker/` are used consistently across Docker, Compose, deploy script, Nuxt config, and README examples.
+- Type consistency: The service name `web`, image name `ag-time-tracker`, network alias `aq-time-tracker`, app port `5500`, and base path `/aq-time-tracker/` are used consistently across Docker, Compose, deploy script, Nuxt config, and README examples.

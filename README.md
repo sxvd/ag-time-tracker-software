@@ -57,13 +57,17 @@ The AirGradient tools host deploys the app below:
 https://tools.airgradient.net/aq-time-tracker
 ```
 
-Production expects `.env.production` on the server with at least:
+Production Compose starts its own PostgreSQL container and keeps data in the `postgres_data` Docker volume. The deploy script creates a server-only `.env.production` with generated secrets on first run, so do not commit that file.
+
+Optional `.env.production` overrides:
 
 ```dotenv
-DATABASE_URL="postgresql://user:password@host:5432/ag_time_tracker?schema=public"
+POSTGRES_DB="ag_time_tracker"
+POSTGRES_USER="postgres"
+POSTGRES_PASSWORD="replace-with-a-long-url-safe-secret"
 NUXT_SESSION_PASSWORD="prod-example-session-secret-32-characters"
 NUXT_AI_INSIGHTS_API_KEY=""
-PORT="5300"
+PORT="5500"
 NITRO_HOST="0.0.0.0"
 NUXT_APP_BASE_URL="/aq-time-tracker/"
 ```
@@ -74,7 +78,13 @@ Before first deployment, confirm the shared Docker network exists:
 docker network ls
 ```
 
-Deploy from `/opt/apps/aq-time-tracker`:
+The tools host Nginx route should proxy `/aq-time-tracker` to:
+
+```text
+http://aq-time-tracker:5500
+```
+
+Deploy from `/opt/apps/tracker`:
 
 ```bash
 ./deploy.sh
@@ -92,7 +102,7 @@ Force a rebuild and restart:
 npm run test
 npm run build
 docker compose -f docker-compose.dev.yml run --rm test
-docker compose -f docker-compose.prod.yml config
+docker compose -f docker-compose.prod.yml --env-file .env.example config
 ```
 
 ## Hackathon Demo Script
