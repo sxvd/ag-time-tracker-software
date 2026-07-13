@@ -100,7 +100,7 @@ ensure_env_secret "NUXT_SESSION_PASSWORD"
 ensure_env_key "NUXT_AI_INSIGHTS_API_KEY" ""
 ensure_env_key "PORT" "5500"
 ensure_env_key "NITRO_HOST" "0.0.0.0"
-ensure_env_key "NUXT_APP_BASE_URL" "/aq-time-tracker/"
+ensure_env_key "NUXT_APP_BASE_URL" "/tracker/"
 
 DB_NAME=$(get_env_value "POSTGRES_DB")
 DB_USER=$(get_env_value "POSTGRES_USER")

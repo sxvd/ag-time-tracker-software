@@ -54,7 +54,7 @@ docker compose -f docker-compose.dev.yml down
 The AirGradient tools host deploys the app below:
 
 ```text
-https://tools.airgradient.net/aq-time-tracker
+https://tools.airgradient.net/tracker
 ```
 
 Production Compose starts its own PostgreSQL container and keeps data in the `postgres_data` Docker volume. The deploy script creates a server-only `.env.production` with generated secrets on first run, so do not commit that file.
@@ -69,7 +69,7 @@ NUXT_SESSION_PASSWORD="prod-example-session-secret-32-characters"
 NUXT_AI_INSIGHTS_API_KEY=""
 PORT="5500"
 NITRO_HOST="0.0.0.0"
-NUXT_APP_BASE_URL="/aq-time-tracker/"
+NUXT_APP_BASE_URL="/tracker/"
 ```
 
 Before first deployment, confirm the shared Docker network exists:
@@ -78,10 +78,10 @@ Before first deployment, confirm the shared Docker network exists:
 docker network ls
 ```
 
-The tools host Nginx route should proxy `/aq-time-tracker` to:
+The tools host Nginx route should proxy `/tracker` to:
 
 ```text
-http://aq-time-tracker:5500
+http://tracker:5500
 ```
 
 Deploy from `/opt/apps/tracker`:

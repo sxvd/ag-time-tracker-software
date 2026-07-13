@@ -28,17 +28,17 @@ describe('production deployment configuration', () => {
     expect(appPort).toBe(5500)
     expect(reservedToolsHostPorts).not.toContain(appPort)
     expect(compose).toContain(`- "${appPort}:${appPort}"`)
-    expect(compose).toContain(`http://127.0.0.1:${appPort}/aq-time-tracker/api/health`)
-    expect(compose).toMatch(/app-network:[\s\S]*aliases:[\s\S]*-\s*aq-time-tracker/)
+    expect(compose).toContain(`http://127.0.0.1:${appPort}/tracker/api/health`)
+    expect(compose).toMatch(/app-network:[\s\S]*aliases:[\s\S]*-\s*tracker/)
     expect(compose).toMatch(/app-network:[\s\S]*external:\s*true[\s\S]*name:\s*app-network/)
-    expect(compose).toContain('NUXT_APP_BASE_URL: /aq-time-tracker/')
+    expect(compose).toContain('NUXT_APP_BASE_URL: /tracker/')
 
     expect(dockerfile).toContain(`ENV PORT=${appPort}`)
     expect(dockerfile).toContain(`EXPOSE ${appPort}`)
     expect(dockerfile).toContain('apt-get install -y --no-install-recommends ca-certificates openssl')
     expect(envExample).toContain(`PORT="${appPort}"`)
     expect(readme).toContain(`PORT="${appPort}"`)
-    expect(readme).toContain(`http://aq-time-tracker:${appPort}`)
+    expect(readme).toContain(`http://tracker:${appPort}`)
   })
 
   it('keeps the cron deploy script rebuild-and-start focused', () => {
