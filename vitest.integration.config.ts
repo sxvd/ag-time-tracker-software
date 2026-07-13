@@ -1,14 +1,15 @@
-import { defineConfig } from 'vitest/config'
 import { fileURLToPath } from 'node:url'
+import { defineConfig } from 'vitest/config'
 
 const frontendDir = fileURLToPath(new URL('./frontend', import.meta.url))
 const rootDir = fileURLToPath(new URL('.', import.meta.url))
 
 export default defineConfig({
   test: {
-    environment: 'happy-dom',
+    environment: 'node',
     globals: true,
-    include: ['tests/unit/**/*.test.ts']
+    include: ['tests/integration/**/*.test.ts'],
+    fileParallelism: false
   },
   resolve: {
     alias: {

@@ -17,6 +17,20 @@ services:
       timeout: 5s
       retries: 12
 
+  postgres-test:
+    image: postgres:16-bookworm
+    environment:
+      POSTGRES_DB: ag_time_tracker_test
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-postgres} -d ag_time_tracker_test"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    tmpfs:
+      - /var/lib/postgresql/data
+
   web:
     build:
       context: .
@@ -47,16 +61,18 @@ services:
       context: .
       target: test
     depends_on:
-      postgres:
+      postgres-test:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-ag_time_tracker}?schema=public
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres-test:5432/ag_time_tracker_test?schema=public
+      TEST_DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres-test:5432/ag_time_tracker_test?schema=public
       NUXT_SESSION_PASSWORD: ${NUXT_SESSION_PASSWORD:-local-docker-session-secret-32-characters}
       NUXT_AI_INSIGHTS_API_KEY: ${NUXT_AI_INSIGHTS_API_KEY:-}
       NUXT_APP_BASE_URL: /
     command: >
       sh -c "npx prisma migrate deploy --schema=backend/prisma/schema.prisma
-      && npm run test"
+      && npm run test
+      && npm run test:integration"
 
 volumes:
   postgres_data:

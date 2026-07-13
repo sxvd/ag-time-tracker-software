@@ -8,6 +8,7 @@
     "generate": "nuxt generate",
     "preview": "nuxt preview",
     "test": "vitest run",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
     "lint": "nuxt typecheck",
     "db:seed": "prisma db seed"
   },
