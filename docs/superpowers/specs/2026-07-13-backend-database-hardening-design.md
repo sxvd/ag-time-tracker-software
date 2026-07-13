@@ -158,7 +158,7 @@ Allow a user to edit their own completed entry and recalculate all dependent rec
 4. Validate dates, pauses, and overlap against the user's other entries.
 5. Replace pauses, feedback, and blockers within one Prisma transaction.
 6. Update the entry, set `isEdited = true`, and create an `entry_audit_events` record containing old and new values for changed fields.
-7. Refresh affected derived dates and medal state after the entry transaction using the existing recomputation service. Change Set 6 later hardens this path with a persisted retry marker without changing the edit API contract.
+7. Refresh affected derived dates and medal state after the entry transaction using the existing recomputation service. Change Set 7 later hardens this path with a persisted retry marker without changing the edit API contract.
 
 ### Verification gate
 
@@ -191,7 +191,62 @@ The server clock is authoritative for pause boundaries. The frontend displays se
 - Browser verification pauses, refreshes, resumes, and confirms excluded duration.
 - Migration, Prisma validation, API tests, typecheck, and build pass.
 
-## Change Set 6: Make Breezy And Medal Derivation Consistent
+## Change Set 6: Persist Context Switches During Active Work
+
+### Goal
+
+Count privacy-preserving browser-tab departures during active work and persist them immediately so the total survives refreshes, crashes, and multiple tabs.
+
+### Definition
+
+A context switch is one transition of the tracking document from visible to hidden while all of these conditions are true:
+
+- The authenticated user has an active entry.
+- The active entry is not paused.
+- The user's `activityEnabled` setting is true.
+- The previous known document state was visible.
+
+Returning from hidden to visible does not increment the count. Refresh, browser unload, duplicate hidden events, switches while paused, and visibility changes without an active timer must not create additional counts.
+
+The feature records counts only. It must never record destination URLs, website names, application names, window titles, screenshots, keystrokes, screen contents, or the destination of a switch.
+
+### API and data flow
+
+1. Timer start creates an active entry with `contextSwitches = 0`.
+2. The frontend listens for `visibilitychange` and evaluates the active, unpaused, activity-enabled conditions.
+3. For a qualifying visible-to-hidden transition, the frontend calls `POST /api/timer-context-switch` with the active `entryId`.
+4. The backend authenticates the request, verifies entry ownership and active status, verifies persisted activity settings, and increments `context_switches` atomically in PostgreSQL.
+5. The backend returns the persisted count and the frontend displays that value.
+6. Bootstrap returns the persisted count for an active entry so refresh does not reset the UI to zero.
+7. Timer stop reads the database value and does not accept a client-supplied total that could overwrite persisted data.
+
+The first implementation serializes client requests so simultaneous visibility events cannot overwrite each other. It does not add a context-event history table because the product requires counts only. If production evidence later shows duplicate delivery during retries, an idempotency key may be added without storing destinations or activity content.
+
+### Failure behavior
+
+- A request for another user's entry returns 404 to avoid disclosing entry existence.
+- A request for a completed entry returns 409.
+- If activity tracking is disabled, the endpoint performs a successful no-op and returns the existing count.
+- A failed event request is retried only while the same entry remains active. It must not be applied to a later entry.
+- The UI uses the server-returned total; it does not permanently display an optimistic count that failed to persist.
+
+### Aggregate usage
+
+- Personal history and export may show the owner's entry count.
+- Breezy and medal derivation may use the persisted count.
+- Company dashboards may show aggregated trends only and must not expose per-person context-switch totals or rankings.
+
+### Verification gate
+
+- Unit tests cover the visible-to-hidden state transition guard.
+- Component tests cover no active timer, paused timer, disabled activity tracking, duplicate hidden events, and restoration from bootstrap.
+- PostgreSQL-backed API tests cover atomic increment, ownership denial, completed-entry conflict, disabled-setting no-op, and concurrent requests.
+- A browser test starts a timer, changes tab, returns, refreshes, and confirms the persisted total in the UI and database.
+- A stop test proves the client cannot overwrite the persisted total with zero or another submitted value.
+- Privacy assertions confirm that no destination or screen-detail fields are introduced in requests, schema, logs, dashboards, or exports.
+- API tests, unit tests, typecheck, and production build pass.
+
+## Change Set 7: Make Breezy And Medal Derivation Consistent
 
 ### Goal
 
@@ -216,7 +271,7 @@ This avoids a transaction that spans every historical entry while ensuring the d
 - Re-running the processor produces the same Breezy days and medal set.
 - API tests, typecheck, migration checks, and build pass.
 
-## Change Set 7: Connect Or Deliberately Defer Optional Persistence
+## Change Set 8: Connect Or Deliberately Defer Optional Persistence
 
 ### Breezy nudges
 
@@ -232,7 +287,7 @@ Keep theme in `localStorage` as a device preference. It is not personal time-tra
 - No core user data depends on browser-only persistence.
 - Relevant documentation matches implementation.
 
-## Change Set 8: Isolate The Legacy Application From Production
+## Change Set 9: Isolate The Legacy Application From Production
 
 ### Goal
 
