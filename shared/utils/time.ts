@@ -5,6 +5,10 @@ export type EnergyLevel = 'High' | 'OK' | 'Drained'
 
 export interface PauseWindow {
   startedAt: string
+  endedAt: string | null
+}
+
+export interface ClosedPauseWindow extends PauseWindow {
   endedAt: string
 }
 
@@ -23,7 +27,7 @@ export function secondsBetween(startedAt: string | Date, endedAt: string | Date)
 }
 
 export function pauseSeconds(pauses: PauseWindow[]) {
-  return pauses.reduce((total, pause) => total + secondsBetween(pause.startedAt, pause.endedAt), 0)
+  return pauses.reduce((total, pause) => total + (pause.endedAt ? secondsBetween(pause.startedAt, pause.endedAt) : 0), 0)
 }
 
 export function calculateDuration(startedAt: string, endedAt: string, pauses: PauseWindow[] = [], idleSeconds = 0) {

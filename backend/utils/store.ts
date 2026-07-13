@@ -1,5 +1,5 @@
 import { awardMedals, calculateDuration, deriveBreezyDay, toCsv } from '../../shared/utils/time'
-import type { EfficiencyFeel, EnergyLevel, FlowQuality, PauseWindow } from '../../shared/utils/time'
+import type { ClosedPauseWindow, EfficiencyFeel, EnergyLevel, FlowQuality } from '../../shared/utils/time'
 import { Prisma } from '@prisma/client'
 import { prisma } from './prisma'
 import { optionalString, pauseWindows } from './validation'
@@ -32,7 +32,7 @@ export interface TimeEntryInput {
   locationLabel?: string
   feedback?: EntryFeedbackInput
   blockers?: string[]
-  pauses?: PauseWindow[]
+  pauses?: ClosedPauseWindow[]
 }
 
 export interface EntryFeedbackInput {
@@ -174,7 +174,7 @@ function mapEntry(entry: {
   contextSwitches: number
   locationLabel: string | null
   createdAt: Date
-  pauses: { startedAt: Date, endedAt: Date }[]
+  pauses: { startedAt: Date, endedAt: Date | null }[]
   feedback: { flowQuality: string, efficiencyFeel: string, energy: string, note: string | null } | null
   blockers: { blocker: { name: string } }[]
 }) {
@@ -192,7 +192,7 @@ function mapEntry(entry: {
     locationLabel: entry.locationLabel || '',
     pauses: entry.pauses.map((pause) => ({
       startedAt: pause.startedAt.toISOString(),
-      endedAt: pause.endedAt.toISOString()
+      endedAt: pause.endedAt?.toISOString() || null
     })),
     feedback: entry.feedback
       ? {
@@ -640,24 +640,36 @@ export async function stopEntry(input: {
   userId: string
   idleSeconds: number
   contextSwitches: number
-  pauses: PauseWindow[]
   feedback?: EntryFeedbackInput
   blockers: string[]
 }) {
   const entry = await prisma.timeEntry.findFirst({
-    where: { id: input.entryId, userId: input.userId, endedAt: null }
+    where: { id: input.entryId, userId: input.userId, endedAt: null },
+    include: { pauses: true }
   })
   if (!entry) throw createError({ statusCode: 404, statusMessage: 'Entry not found.' })
 
   const endedAt = new Date()
-  const pauses = pauseWindows('pauses', input.pauses || [], entry.startedAt, endedAt)
+  const openPause = entry.pauses.find((pause) => pause.endedAt === null)
+  const pauses = entry.pauses.map((pause) => ({
+    startedAt: pause.startedAt.toISOString(),
+    endedAt: (pause.endedAt || endedAt).toISOString()
+  }))
   const feedback = validateFeedback(input.feedback)
   const blockers = normalizeBlockers(input.blockers)
   const blockerIds = await blockerIdsForNames(blockers)
   const durationSeconds = calculateDuration(entry.startedAt.toISOString(), endedAt.toISOString(), pauses, Math.max(0, Number(input.idleSeconds || 0)))
 
   const saved = await prisma.$transaction(async (tx) => {
-    await tx.entryPause.deleteMany({ where: { entryId: entry.id } })
+    if (openPause) {
+      await tx.entryPause.update({
+        where: { id: openPause.id },
+        data: {
+          endedAt,
+          durationSeconds: calculateDuration(openPause.startedAt.toISOString(), endedAt.toISOString())
+        }
+      })
+    }
     await tx.entryFeedback.deleteMany({ where: { entryId: entry.id } })
     await tx.entryBlocker.deleteMany({ where: { entryId: entry.id } })
 
@@ -668,13 +680,6 @@ export async function stopEntry(input: {
         durationSeconds,
         idleSeconds: Math.max(0, Number(input.idleSeconds || 0)),
         contextSwitches: Math.max(0, Number(input.contextSwitches || 0)),
-        pauses: {
-          create: pauses.map((pause) => ({
-            startedAt: new Date(pause.startedAt),
-            endedAt: new Date(pause.endedAt),
-            durationSeconds: calculateDuration(pause.startedAt, pause.endedAt)
-          }))
-        },
         feedback: feedback ? { create: feedback } : undefined,
         blockers: {
           create: blockerIds.map((blockerId) => ({ blockerId }))
@@ -782,9 +787,12 @@ export async function updateEntry(userId: string, entryId: string, input: TimeEn
 
   const idleSeconds = Math.max(0, Number(input.idleSeconds ?? existing.idleSeconds))
   const contextSwitches = Math.max(0, Number(input.contextSwitches ?? existing.contextSwitches))
+  if (existing.pauses.some((pause) => pause.endedAt === null)) {
+    throw createError({ statusCode: 409, statusMessage: 'Completed entry has an open pause.' })
+  }
   const pauses = pauseWindows('pauses', input.pauses || existing.pauses.map((pause) => ({
     startedAt: pause.startedAt.toISOString(),
-    endedAt: pause.endedAt.toISOString()
+    endedAt: pause.endedAt!.toISOString()
   })), startedAt, endedAt)
   const feedback = validateFeedback(input.feedback || (existing.feedback ? {
     flowQuality: existing.feedback.flowQuality as FlowQuality,
@@ -849,7 +857,7 @@ function auditEntrySnapshot(entry: {
   idleSeconds: number
   contextSwitches: number
   locationLabel: string | null
-  pauses: Array<{ startedAt: Date, endedAt: Date }>
+  pauses: Array<{ startedAt: Date, endedAt: Date | null }>
   feedback: { flowQuality: string, efficiencyFeel: string, energy: string, note: string | null } | null
   blockers: Array<{ blocker: { name: string } }>
 }) {
@@ -861,7 +869,7 @@ function auditEntrySnapshot(entry: {
     idleSeconds: entry.idleSeconds,
     contextSwitches: entry.contextSwitches,
     locationLabel: entry.locationLabel,
-    pauses: entry.pauses.map((pause) => ({ startedAt: pause.startedAt.toISOString(), endedAt: pause.endedAt.toISOString() })),
+    pauses: entry.pauses.map((pause) => ({ startedAt: pause.startedAt.toISOString(), endedAt: pause.endedAt?.toISOString() || null })),
     feedback: entry.feedback,
     blockers: entry.blockers.map((row) => row.blocker.name)
   }
@@ -927,16 +935,6 @@ export async function exportData(userId: string, format: 'csv' | 'json') {
     data: { userId, format }
   })
   return format === 'csv' ? toCsv(rows) : JSON.stringify(rows, null, 2)
-}
-
-function sanitizePauses(pauses: PauseWindow[]) {
-  return pauses
-    .map((pause) => ({ startedAt: String(pause.startedAt || ''), endedAt: String(pause.endedAt || '') }))
-    .filter((pause) => {
-      const startedAt = new Date(pause.startedAt)
-      const endedAt = new Date(pause.endedAt)
-      return !Number.isNaN(startedAt.getTime()) && !Number.isNaN(endedAt.getTime()) && endedAt > startedAt
-    })
 }
 
 function coerceSettings(settings: Record<string, unknown>) {

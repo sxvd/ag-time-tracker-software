@@ -108,6 +108,8 @@ Relevant current API files:
 
 - `backend/api/timer-start.post.ts`
 - `backend/api/timer-stop.post.ts`
+- `backend/api/timer-pause.post.ts`
+- `backend/api/timer-resume.post.ts`
 - `backend/api/manual-entry.post.ts`
 - `backend/api/entries/[id].patch.ts`
 - `backend/utils/store.ts`
@@ -116,16 +118,16 @@ Relevant current API files:
 ## Current Implementation
 
 - `startEntry` creates an active persisted entry after checking task membership.
-- `stopEntry` stores stop time, idle seconds, context switches, pauses, feedback, blockers, and calculated duration through Prisma.
+- `pauseActiveEntry` creates one server-timestamped open pause; `resumeActiveEntry` closes it and calculates pause duration on the server.
+- `stopEntry` closes any open pause at the stop timestamp and stores idle seconds, context switches, feedback, blockers, and duration excluding persisted pauses.
 - `createManualEntry` creates retroactive manual entries, records an audit event, and validates `endedAt > startedAt`.
 - `updateEntry` edits completed entries owned by the authenticated user, validates task access and overlap, replaces pauses/feedback/blockers in one transaction, and records before/after audit data.
 - `shared/utils/time.ts` calculates duration, pauses, idle decisions, context switches, estimate variance, Breezy day derivation, and medals.
-- `frontend/app.vue` handles live elapsed time, local pause/resume, stop feedback, manual entry form, and entry history display with an edit-entry modal and edited marker.
+- `frontend/app.vue` handles live elapsed time, persisted pause/resume state restored by bootstrap, stop feedback, manual entry form, and entry history display with an edit-entry modal and edited marker.
 
 ## Gaps
 
 - Runtime entries are persisted to PostgreSQL.
-- Pause windows are only submitted on stop, not persisted during an active paused state.
 - Editing refreshes current Breezy day and medal records synchronously; durable retry for failed derived refreshes remains a separate hardening change.
 
 ## Acceptance Criteria
@@ -142,4 +144,5 @@ Relevant current API files:
 - Unit tests for duration, pause handling, overlap validation, and estimate variance.
 - API tests for start, stop, manual entry, edit entry, and ownership enforcement.
 - PostgreSQL integration coverage for successful edits, audit data, export flags, task access, ownership, and overlap rejection.
+- PostgreSQL integration coverage for pause/resume ownership, duplicate/racing pauses, refresh state, and stopping while paused.
 - Browser check: create/select task, start, pause, resume, stop, save feedback, add manual entry, edit entry.

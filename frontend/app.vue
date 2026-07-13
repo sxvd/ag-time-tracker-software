@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import type { EfficiencyFeel, EnergyLevel, FlowQuality, PauseWindow } from '~~/shared/utils/time'
-import { countContextSwitches, secondsBetween } from '~~/shared/utils/time'
+import type { ClosedPauseWindow, EfficiencyFeel, EnergyLevel, FlowQuality, PauseWindow } from '~~/shared/utils/time'
+import { calculateDuration, countContextSwitches } from '~~/shared/utils/time'
 import { withAppBase } from '~~/shared/utils/url'
 
 type AudienceMode = 'You' | 'Company'
@@ -50,7 +50,6 @@ const themeMode = ref<ThemeMode>('light')
 const elapsedSeconds = ref(0)
 const timerId = ref<ReturnType<typeof setInterval> | null>(null)
 const pausedAt = ref<string | null>(null)
-const pauses = ref<PauseWindow[]>([])
 const contextSwitches = ref(0)
 const idleSeconds = ref(0)
 const showFeedback = ref(false)
@@ -71,6 +70,7 @@ const showShareTaskModal = ref(false)
 const editingEntry = ref<ApiState['entries'][number] | null>(null)
 const editEntryError = ref('')
 const isSavingEntryEdit = ref(false)
+const isUpdatingPause = ref(false)
 const sharePickerOpen = ref(false)
 const selectedShareUserIds = ref<string[]>([])
 const breakPulse = ref(0)
@@ -237,6 +237,8 @@ onBeforeUnmount(() => {
 
 async function loadState(next?: ApiState) {
   state.value = next || await authFetch<ApiState>('/api/bootstrap')
+  const openPause = activeEntry.value?.pauses.find((pause) => pause.endedAt === null)
+  pausedAt.value = openPause?.startedAt || null
   const runningTask = activeEntry.value ? state.value.tasks.find((task) => task.id === activeEntry.value?.taskId) : null
   if (runningTask) {
     selectedTaskId.value = runningTask.id
@@ -383,7 +385,6 @@ async function startTimer() {
   const taskId = await ensureInlineTask()
   if (!taskId) return
   const next = await authFetch<ApiState>('/api/timer-start', { method: 'POST', body: { taskId } })
-  pauses.value = []
   contextSwitches.value = 0
   idleSeconds.value = 0
   await loadState(next)
@@ -401,10 +402,10 @@ async function handlePrimaryTimerAction() {
     return
   }
   if (pausedAt.value) {
-    resumeTimer()
+    await resumeTimer()
     return
   }
-  pauseTimer()
+  await pauseTimer()
 }
 
 async function shareCurrentTask() {
@@ -423,9 +424,19 @@ async function shareCurrentTask() {
   breezyMessage.value = 'Task invitation sent.'
 }
 
-function pauseTimer() {
-  pausedAt.value = new Date().toISOString()
-  breezyMessage.value = 'Take a breath. The timer is paused.'
+async function pauseTimer() {
+  if (!activeEntry.value || isUpdatingPause.value) return
+  isUpdatingPause.value = true
+  try {
+    const next = await authFetch<ApiState>('/api/timer-pause', { method: 'POST', body: { entryId: activeEntry.value.id } })
+    await loadState(next)
+    breezyMessage.value = 'Take a breath. The timer is paused and saved.'
+  } catch {
+    await loadState().catch(() => null)
+    breezyMessage.value = 'Could not pause the timer. Its server state was refreshed.'
+  } finally {
+    isUpdatingPause.value = false
+  }
 }
 
 function takeBreak() {
@@ -433,10 +444,19 @@ function takeBreak() {
   breezyMessage.value = 'Do not forget to drink water while you take a break.'
 }
 
-function resumeTimer() {
-  if (pausedAt.value) pauses.value.push({ startedAt: pausedAt.value, endedAt: new Date().toISOString() })
-  pausedAt.value = null
-  breezyMessage.value = 'Back at it, gently.'
+async function resumeTimer() {
+  if (!activeEntry.value || !pausedAt.value || isUpdatingPause.value) return
+  isUpdatingPause.value = true
+  try {
+    const next = await authFetch<ApiState>('/api/timer-resume', { method: 'POST', body: { entryId: activeEntry.value.id } })
+    await loadState(next)
+    breezyMessage.value = 'Back at it, gently.'
+  } catch {
+    await loadState().catch(() => null)
+    breezyMessage.value = 'Could not resume the timer. Its server state was refreshed.'
+  } finally {
+    isUpdatingPause.value = false
+  }
 }
 
 function stopTimer() {
@@ -461,7 +481,6 @@ async function saveFeedback(payload?: { flowQuality: FlowQuality, efficiencyFeel
         entryId: lastStoppedEntry.value,
         idleSeconds: idleSeconds.value,
         contextSwitches: contextSwitches.value,
-        pauses: pauses.value,
         feedback: payload,
         blockers: payload?.blockers || ['None']
       }
@@ -505,7 +524,7 @@ async function saveEntryEdit(payload: {
   idleSeconds: number
   contextSwitches: number
   locationLabel: string
-  pauses: PauseWindow[]
+  pauses: ClosedPauseWindow[]
   feedback: { flowQuality: FlowQuality, efficiencyFeel: EfficiencyFeel, energy: EnergyLevel, note: string }
   blockers: string[]
 }) {
@@ -566,8 +585,13 @@ function syncTimer() {
     return
   }
   const tick = () => {
-    if (pausedAt.value || !activeEntry.value) return
-    elapsedSeconds.value = secondsBetween(activeEntry.value.startedAt, new Date()) - idleSeconds.value
+    if (!activeEntry.value) return
+    elapsedSeconds.value = calculateDuration(
+      activeEntry.value.startedAt,
+      pausedAt.value || new Date().toISOString(),
+      activeEntry.value.pauses,
+      idleSeconds.value
+    )
   }
   tick()
   timerId.value = setInterval(tick, 1000)
@@ -806,7 +830,7 @@ function userInitials(displayName: string) {
                     type="button"
                     class="timer-primary-button"
                     :class="{ 'is-start': !activeEntry, 'is-break': activeEntry && !pausedAt, 'is-resume': pausedAt }"
-                    :disabled="!hasInlineTaskTitle && !activeEntry"
+                    :disabled="(!hasInlineTaskTitle && !activeEntry) || isUpdatingPause"
                     :aria-label="primaryTimerLabel"
                     @click="handlePrimaryTimerAction"
                   >

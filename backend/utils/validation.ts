@@ -1,4 +1,4 @@
-import type { PauseWindow } from '../../shared/utils/time'
+import type { ClosedPauseWindow } from '../../shared/utils/time'
 
 interface ValidationError extends Error {
   statusCode: number
@@ -86,7 +86,7 @@ export function pauseWindows(
   value: unknown,
   entryStart: Date,
   entryEnd: Date
-): PauseWindow[] {
+): ClosedPauseWindow[] {
   if (!Array.isArray(value)) invalid(field, 'must be an array.')
 
   const pauses = value.map((candidate, index) => {

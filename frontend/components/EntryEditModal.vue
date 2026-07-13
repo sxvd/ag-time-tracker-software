@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { EfficiencyFeel, EnergyLevel, FlowQuality, PauseWindow } from '~~/shared/utils/time'
+import type { ClosedPauseWindow, EfficiencyFeel, EnergyLevel, FlowQuality, PauseWindow } from '~~/shared/utils/time'
 
 interface EditableEntry {
   id: string
@@ -31,7 +31,7 @@ const emit = defineEmits<{
     idleSeconds: number
     contextSwitches: number
     locationLabel: string
-    pauses: PauseWindow[]
+    pauses: ClosedPauseWindow[]
     feedback: { flowQuality: FlowQuality, efficiencyFeel: EfficiencyFeel, energy: EnergyLevel, note: string }
     blockers: string[]
   }]
@@ -45,7 +45,7 @@ const contextSwitches = ref(props.entry.contextSwitches)
 const locationLabel = ref(props.entry.locationLabel || '')
 const pauses = ref(props.entry.pauses.map((pause) => ({
   startedAt: toLocalInput(pause.startedAt),
-  endedAt: toLocalInput(pause.endedAt)
+  endedAt: toLocalInput(pause.endedAt || '')
 })))
 const flowQuality = ref<FlowQuality>(props.entry.feedback?.flowQuality || 'Neutral')
 const efficiencyFeel = ref<EfficiencyFeel>(props.entry.feedback?.efficiencyFeel || 'Felt efficient')
