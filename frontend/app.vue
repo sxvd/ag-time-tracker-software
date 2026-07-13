@@ -10,8 +10,8 @@ type ThemeMode = 'light' | 'dark'
 interface ApiState {
   user: { id: string, email: string, displayName: string, team: string }
   sessionToken?: string
-  users: { id: string, email: string, displayName: string, team: string }[]
-  signedInUsers: { id: string, email: string, displayName: string, team: string }[]
+  users: { id: string, displayName: string, team: string }[]
+  signedInUsers: { id: string, displayName: string, team: string }[]
   taskInvitations: Array<{ id: string, taskId: string, senderId: string, recipientId: string, status: 'pending' | 'accepted', createdAt: string, respondedAt?: string }>
   categories: { id: string, name: string }[]
   clients: { id: string, name: string }[]
@@ -1041,7 +1041,6 @@ function userInitials(displayName: string) {
               <span class="share-user-avatar">{{ userInitials(user.displayName) }}</span>
               <span class="share-user-copy">
                 <strong>{{ user.displayName }}</strong>
-                <small>{{ user.email }}</small>
                 <em>{{ user.team }}</em>
               </span>
               <span v-if="invitationForRecipient(user.id)" class="invite-chip">{{ invitationForRecipient(user.id) }}</span>

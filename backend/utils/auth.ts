@@ -12,7 +12,16 @@ async function derivePasswordKey(password: string, salt: string) {
 }
 
 function sessionSecret(event: H3Event) {
-  return useRuntimeConfig(event).sessionPassword || 'dev-session-secret-change-me'
+  return validateSessionSecret(useRuntimeConfig(event).sessionPassword || '', process.env.NODE_ENV || 'development')
+}
+
+export function validateSessionSecret(secret: string, nodeEnv: string) {
+  const fallback = 'dev-session-secret-change-me'
+  if (nodeEnv !== 'production') return secret || fallback
+  if (!secret || secret === fallback || secret.length < 32) {
+    throw new Error('A unique session secret of at least 32 characters is required in production.')
+  }
+  return secret
 }
 
 function base64Url(input: string) {
@@ -88,7 +97,7 @@ export function clearSessionCookie(event: H3Event) {
   deleteCookie(event, cookieName, { path: '/' })
 }
 
-export async function getSessionUser(event: H3Event) {
+export async function getSessionIdentity(event: H3Event) {
   const authHeader = getHeader(event, 'authorization')
   const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.slice('Bearer '.length).trim() : ''
   const token = bearerToken || getCookie(event, cookieName)
@@ -122,20 +131,38 @@ export async function getSessionUser(event: H3Event) {
     }).catch(() => null)
 
     return {
-      id: session.user.id,
-      email: session.user.email,
-      displayName: session.user.displayName,
-      team: session.user.team
+      sessionId: session.id,
+      user: {
+        id: session.user.id,
+        email: session.user.email,
+        displayName: session.user.displayName,
+        team: session.user.team
+      }
     }
   } catch {
     return null
   }
 }
 
+export async function getSessionUser(event: H3Event) {
+  return (await getSessionIdentity(event))?.user || null
+}
+
+export async function requireSessionIdentity(event: H3Event) {
+  const identity = await getSessionIdentity(event)
+  if (!identity) throw createError({ statusCode: 401, statusMessage: 'Please sign in again.' })
+  return identity
+}
+
 export async function requireSessionUser(event: H3Event) {
-  const user = await getSessionUser(event)
-  if (!user) throw createError({ statusCode: 401, statusMessage: 'Please sign in again.' })
-  return user
+  return (await requireSessionIdentity(event)).user
+}
+
+export async function revokeSession(sessionId: string) {
+  await prisma.authSession.update({
+    where: { id: sessionId },
+    data: { revokedAt: new Date() }
+  })
 }
 
 export async function revokeUserSessions(userId: string) {

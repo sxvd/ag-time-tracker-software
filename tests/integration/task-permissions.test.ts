@@ -34,6 +34,7 @@ describe('shared task permissions', () => {
     expect(memberState.entries).toContainEqual(expect.objectContaining({ taskId: fixtures.task.id }))
     expect(unrelatedState.tasks).not.toContainEqual(expect.objectContaining({ id: fixtures.task.id }))
     expect(unrelatedState.entries).not.toContainEqual(expect.objectContaining({ taskId: fixtures.task.id }))
+    expect(pendingState.users[0]).not.toHaveProperty('email')
   })
 
   it('allows only the task owner to invite collaborators', async () => {

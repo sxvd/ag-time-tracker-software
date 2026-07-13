@@ -1,9 +1,14 @@
 import { requireSessionUser } from '../utils/auth'
 import { buildDashboards } from '../utils/store'
+import { enumValue, optionalString } from '../utils/validation'
 
 export default defineEventHandler(async (event) => {
   const user = await requireSessionUser(event)
-  const body = await readBody<{ scope: 'personal' | 'company', team?: string }>(event)
+  const input = await readBody<Record<string, unknown>>(event)
+  const body = {
+    scope: enumValue('scope', input.scope, ['personal', 'company'] as const),
+    team: optionalString('team', input.team, { max: 80 })
+  }
   const apiKey = useRuntimeConfig(event).aiInsightsApiKey
   const dashboards = await buildDashboards(user.id, body.team || 'All')
 

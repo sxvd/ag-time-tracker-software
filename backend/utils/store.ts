@@ -1,6 +1,7 @@
 import { awardMedals, calculateDuration, deriveBreezyDay, toCsv } from '../../shared/utils/time'
 import type { EfficiencyFeel, EnergyLevel, FlowQuality, PauseWindow } from '../../shared/utils/time'
 import { prisma } from './prisma'
+import { optionalString, pauseWindows } from './validation'
 
 export interface User {
   id: string
@@ -94,6 +95,14 @@ function mapUser(user: { id: string, email: string, displayName: string, team: s
   return {
     id: user.id,
     email: user.email,
+    displayName: user.displayName,
+    team: user.team
+  }
+}
+
+function mapCollaborator(user: { id: string, displayName: string, team: string }) {
+  return {
+    id: user.id,
     displayName: user.displayName,
     team: user.team
   }
@@ -211,7 +220,7 @@ function validateFeedback(feedback?: EntryFeedbackInput) {
     flowQuality: feedback.flowQuality,
     efficiencyFeel: feedback.efficiencyFeel,
     energy: feedback.energy,
-    note: String(feedback.note || '')
+    note: optionalString('feedback.note', feedback.note, { max: 2_000 }) || ''
   }
 }
 
@@ -360,12 +369,12 @@ export async function publicState(userId = 'u1', team = 'All') {
     .filter((task) => task.ownerId === userId || task.members.some((member) => member.userId === userId))
     .map((task) => task.id)
   const entries = await loadVisibleEntries(userId, entryAccessibleTaskIds)
-  const signedInUsersById = new Map(activeSessions.map((session) => [session.user.id, mapUser(session.user)]))
-  signedInUsersById.set(user.id, mapUser(user))
+  const signedInUsersById = new Map(activeSessions.map((session) => [session.user.id, mapCollaborator(session.user)]))
+  signedInUsersById.set(user.id, mapCollaborator(user))
 
   return {
     user: mapUser(user),
-    users: users.map(mapUser),
+    users: users.map(mapCollaborator),
     signedInUsers: [...signedInUsersById.values()],
     taskInvitations: invitations.map(mapInvitation),
     categories: categories.map((category) => ({ id: category.id, ownerId: category.ownerId, name: category.name })),
@@ -632,7 +641,7 @@ export async function stopEntry(input: {
   if (!entry) throw createError({ statusCode: 404, statusMessage: 'Entry not found.' })
 
   const endedAt = new Date()
-  const pauses = sanitizePauses(input.pauses || [])
+  const pauses = pauseWindows('pauses', input.pauses || [], entry.startedAt, endedAt)
   const feedback = validateFeedback(input.feedback)
   const blockers = normalizeBlockers(input.blockers)
   const blockerIds = await blockerIdsForNames(blockers)

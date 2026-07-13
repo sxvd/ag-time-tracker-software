@@ -1,6 +1,7 @@
 import { hashPassword, setSessionCookie, verifyPassword } from '../utils/auth'
 import { prisma } from '../utils/prisma'
 import { publicState } from '../utils/store'
+import { requiredString } from '../utils/validation'
 
 function displayNameFromEmail(email: string) {
   return email
@@ -12,14 +13,17 @@ function displayNameFromEmail(email: string) {
 }
 
 export default defineEventHandler(async (event) => {
-  const body = await readBody<{ email: string, password: string }>(event)
-  const email = String(body.email || '').trim().toLowerCase()
-  const password = String(body.password || '')
+  const body = await readBody<Record<string, unknown>>(event)
+  const email = requiredString('email', body.email, { max: 254 }).toLowerCase()
+  const password = typeof body.password === 'string' ? body.password : ''
   if (!email.endsWith('@airgradient.com')) {
     throw createError({ statusCode: 401, statusMessage: 'Use an AirGradient work email.' })
   }
   if (!password) {
     throw createError({ statusCode: 400, statusMessage: 'Password is required.' })
+  }
+  if (password.length > 1_024) {
+    throw createError({ statusCode: 400, statusMessage: 'Password is too long.' })
   }
 
   let user = await prisma.user.findUnique({ where: { email } })
