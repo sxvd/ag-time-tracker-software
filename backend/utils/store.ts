@@ -1,5 +1,6 @@
 import { awardMedals, calculateDuration, deriveBreezyDay, toCsv } from '../../shared/utils/time'
 import type { EfficiencyFeel, EnergyLevel, FlowQuality, PauseWindow } from '../../shared/utils/time'
+import { Prisma } from '@prisma/client'
 import { prisma } from './prisma'
 import { optionalString, pauseWindows } from './validation'
 
@@ -603,27 +604,34 @@ export async function startEntry(input: { taskId: string, userId: string }) {
   if (active) throw createError({ statusCode: 409, statusMessage: 'Stop the current timer first.' })
 
   const startedAt = new Date()
-  return prisma.$transaction(async (tx) => {
-    const entry = await tx.timeEntry.create({
-      data: {
-        taskId: input.taskId,
-        userId: input.userId,
-        startedAt,
-        durationSeconds: 0,
-        isManual: false,
-        idleSeconds: 0,
-        contextSwitches: 0,
-        locationLabel: 'Home office'
-      },
-      include: { pauses: true, feedback: true, blockers: { include: { blocker: true } } }
+  try {
+    return await prisma.$transaction(async (tx) => {
+      const entry = await tx.timeEntry.create({
+        data: {
+          taskId: input.taskId,
+          userId: input.userId,
+          startedAt,
+          durationSeconds: 0,
+          isManual: false,
+          idleSeconds: 0,
+          contextSwitches: 0,
+          locationLabel: 'Home office'
+        },
+        include: { pauses: true, feedback: true, blockers: { include: { blocker: true } } }
+      })
+      await tx.trackingPresence.upsert({
+        where: { userId: input.userId },
+        update: { taskId: input.taskId, entryId: entry.id, startedAt },
+        create: { userId: input.userId, taskId: input.taskId, entryId: entry.id, startedAt }
+      })
+      return mapEntry(entry)
     })
-    await tx.trackingPresence.upsert({
-      where: { userId: input.userId },
-      update: { taskId: input.taskId, entryId: entry.id, startedAt },
-      create: { userId: input.userId, taskId: input.taskId, entryId: entry.id, startedAt }
-    })
-    return mapEntry(entry)
-  })
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+      throw createError({ statusCode: 409, statusMessage: 'Stop the current timer first.' })
+    }
+    throw error
+  }
 }
 
 export async function stopEntry(input: {
