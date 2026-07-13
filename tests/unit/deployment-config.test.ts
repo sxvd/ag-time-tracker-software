@@ -41,6 +41,12 @@ describe('production deployment configuration', () => {
     expect(readme).toContain(`http://tracker:${appPort}`)
   })
 
+  it('keeps local runtime checks on the same /tracker/ base contract', () => {
+    const compose = readProjectFile('docker-compose.dev.yml')
+
+    expect(compose.match(/NUXT_APP_BASE_URL:\s*\/tracker\//g)).toHaveLength(2)
+  })
+
   it('keeps the cron deploy script rebuild-and-start focused', () => {
     const deployScript = readProjectFile('deploy.sh')
 

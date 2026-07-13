@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { EfficiencyFeel, EnergyLevel, FlowQuality, PauseWindow } from '~~/shared/utils/time'
 import { countContextSwitches, secondsBetween } from '~~/shared/utils/time'
+import { withAppBase } from '~~/shared/utils/url'
 
 type AudienceMode = 'You' | 'Company'
 type AppSection = 'Track' | 'Dashboard' | 'Breezy Journey'
@@ -26,6 +27,7 @@ interface ApiState {
     endedAt: string | null
     durationSeconds: number
     isManual: boolean
+    isEdited: boolean
     idleSeconds: number
     contextSwitches: number
     locationLabel: string
@@ -66,6 +68,9 @@ const signIn = reactive({ email: '', password: '' })
 const showCreateTask = ref(false)
 const showManualEntry = ref(false)
 const showShareTaskModal = ref(false)
+const editingEntry = ref<ApiState['entries'][number] | null>(null)
+const editEntryError = ref('')
+const isSavingEntryEdit = ref(false)
 const sharePickerOpen = ref(false)
 const selectedShareUserIds = ref<string[]>([])
 const breakPulse = ref(0)
@@ -79,6 +84,7 @@ const profileForm = reactive({ displayName: '', team: 'Software' })
 const settingsForm = reactive({ idleThresholdMinutes: 5, nudgeCadenceMinutes: 90, breezyVerbosity: 'gentle', muted: false, locationEnabled: false, activityEnabled: true })
 const tabSessionTokenKey = 'breezy-tab-session-token'
 const themeStorageKey = 'breezy-theme-mode'
+const appBaseUrl = useRuntimeConfig().app.baseURL
 
 const currentUserId = computed(() => state.value?.user.id || 'u1')
 const activeEntry = computed(() => state.value?.entries.find((entry) => entry.userId === currentUserId.value && !entry.endedAt) || null)
@@ -207,7 +213,7 @@ function authHeaders(extra?: HeadersInit) {
 }
 
 function authFetch<T>(url: string, options: Parameters<typeof $fetch<T>>[1] = {}) {
-  return $fetch<T>(url, {
+  return $fetch<T>(withAppBase(appBaseUrl, url), {
     ...options,
     credentials: 'include',
     headers: authHeaders(options.headers)
@@ -486,6 +492,41 @@ async function addManualEntry() {
   showManualEntry.value = false
 }
 
+function openEntryEditor(entry: ApiState['entries'][number]) {
+  if (entry.userId !== currentUserId.value || !entry.endedAt) return
+  editEntryError.value = ''
+  editingEntry.value = entry
+}
+
+async function saveEntryEdit(payload: {
+  taskId: string
+  startedAt: string
+  endedAt: string
+  idleSeconds: number
+  contextSwitches: number
+  locationLabel: string
+  pauses: PauseWindow[]
+  feedback: { flowQuality: FlowQuality, efficiencyFeel: EfficiencyFeel, energy: EnergyLevel, note: string }
+  blockers: string[]
+}) {
+  if (!editingEntry.value || isSavingEntryEdit.value) return
+  editEntryError.value = ''
+  isSavingEntryEdit.value = true
+  try {
+    const next = await authFetch<ApiState>(`/api/entries/${editingEntry.value.id}`, {
+      method: 'PATCH',
+      body: payload
+    })
+    await loadState(next)
+    editingEntry.value = null
+    breezyMessage.value = 'Entry updated. Its history and daily rollups were refreshed.'
+  } catch (error: any) {
+    editEntryError.value = error?.data?.statusMessage || error?.data?.message || 'Could not update this entry.'
+  } finally {
+    isSavingEntryEdit.value = false
+  }
+}
+
 async function saveProfile() {
   const next = await authFetch<ApiState>('/api/profile', { method: 'PATCH', body: profileForm })
   await loadState(next)
@@ -507,7 +548,7 @@ async function refreshCompany() {
 }
 
 function exportUrl(format: 'csv' | 'json') {
-  return `/api/export?format=${format}`
+  return withAppBase(appBaseUrl, `/api/export?format=${format}`)
 }
 
 async function acceptInvitation(invitationId: string) {
@@ -837,6 +878,14 @@ function userInitials(displayName: string) {
                     <strong>{{ entryFeeling(entry) }}</strong>
                     <small v-if="entry.feedback?.note">{{ entry.feedback.note }}</small>
                     <small v-if="entry.isManual">Manual</small>
+                    <small v-if="entry.isEdited">Edited</small>
+                    <button
+                      v-if="entry.userId === currentUserId && entry.endedAt"
+                      type="button"
+                      class="btn ghost sm"
+                      :aria-label="`Edit ${taskName(entry.taskId)} entry`"
+                      @click="openEntryEditor(entry)"
+                    >Edit</button>
                   </div>
                 </template>
                 <template v-else>
@@ -1025,6 +1074,16 @@ function userInitials(displayName: string) {
       </div>
 
       <FeedbackModal v-if="showFeedback" :error="feedbackError" :saving="isSavingFeedback" @save="saveFeedback" @skip="saveFeedback()" />
+      <EntryEditModal
+        v-if="editingEntry"
+        :entry="editingEntry"
+        :tasks="state.tasks"
+        :blocker-options="state.blockers"
+        :saving="isSavingEntryEdit"
+        :error="editEntryError"
+        @cancel="editingEntry = null"
+        @save="saveEntryEdit"
+      />
       <div v-if="showShareTaskModal && shareableTask" class="modal-backdrop">
         <section class="task-modal share-modal" aria-modal="true" role="dialog" aria-labelledby="share-task-title">
           <div class="modal-title-row">

@@ -32,6 +32,7 @@ export interface TimeEntryInput {
   locationLabel?: string
   feedback?: EntryFeedbackInput
   blockers?: string[]
+  pauses?: PauseWindow[]
 }
 
 export interface EntryFeedbackInput {
@@ -749,6 +750,121 @@ export async function createManualEntry(input: TimeEntryInput) {
 
   await refreshDerivedRecords(userId)
   return mapEntry(entry)
+}
+
+export async function updateEntry(userId: string, entryId: string, input: TimeEntryInput) {
+  const existing = await prisma.timeEntry.findFirst({
+    where: { id: entryId, userId, endedAt: { not: null } },
+    include: { pauses: true, feedback: true, blockers: { include: { blocker: true } } }
+  })
+  if (!existing || !existing.endedAt) throw createError({ statusCode: 404, statusMessage: 'Entry not found.' })
+
+  const taskId = input.taskId || existing.taskId
+  const task = await prisma.task.findUnique({ where: { id: taskId }, include: { members: true } })
+  if (!task) throw createError({ statusCode: 404, statusMessage: 'Task not found.' })
+  if (!canTrackTask(mapTask(task), userId)) throw createError({ statusCode: 403, statusMessage: 'You cannot move this entry to that task.' })
+
+  const startedAt = normaliseDateInput(input.startedAt) || existing.startedAt
+  const endedAt = normaliseDateInput(input.endedAt) || existing.endedAt
+  if (endedAt <= startedAt) throw createError({ statusCode: 400, statusMessage: 'Entry end must be after start.' })
+
+  const overlap = await prisma.timeEntry.findFirst({
+    where: {
+      userId,
+      id: { not: entryId },
+      OR: [
+        { endedAt: null },
+        { startedAt: { lt: endedAt }, endedAt: { gt: startedAt } }
+      ]
+    }
+  })
+  if (overlap) throw createError({ statusCode: 409, statusMessage: 'Edited entry overlaps existing tracked time.' })
+
+  const idleSeconds = Math.max(0, Number(input.idleSeconds ?? existing.idleSeconds))
+  const contextSwitches = Math.max(0, Number(input.contextSwitches ?? existing.contextSwitches))
+  const pauses = pauseWindows('pauses', input.pauses || existing.pauses.map((pause) => ({
+    startedAt: pause.startedAt.toISOString(),
+    endedAt: pause.endedAt.toISOString()
+  })), startedAt, endedAt)
+  const feedback = validateFeedback(input.feedback || (existing.feedback ? {
+    flowQuality: existing.feedback.flowQuality as FlowQuality,
+    efficiencyFeel: existing.feedback.efficiencyFeel as EfficiencyFeel,
+    energy: existing.feedback.energy as EnergyLevel,
+    note: existing.feedback.note || ''
+  } : undefined))
+  const blockers = normalizeBlockers(input.blockers || existing.blockers.map((row) => row.blocker.name))
+  const blockerIds = await blockerIdsForNames(blockers)
+  const durationSeconds = calculateDuration(startedAt.toISOString(), endedAt.toISOString(), pauses, idleSeconds)
+  const before = auditEntrySnapshot(existing)
+
+  const updated = await prisma.$transaction(async (tx) => {
+    await tx.entryPause.deleteMany({ where: { entryId } })
+    await tx.entryFeedback.deleteMany({ where: { entryId } })
+    await tx.entryBlocker.deleteMany({ where: { entryId } })
+
+    const saved = await tx.timeEntry.update({
+      where: { id: entryId },
+      data: {
+        taskId,
+        startedAt,
+        endedAt,
+        durationSeconds,
+        idleSeconds,
+        contextSwitches,
+        locationLabel: input.locationLabel ?? existing.locationLabel,
+        isEdited: true,
+        pauses: {
+          create: pauses.map((pause) => ({
+            startedAt: new Date(pause.startedAt),
+            endedAt: new Date(pause.endedAt),
+            durationSeconds: calculateDuration(pause.startedAt, pause.endedAt)
+          }))
+        },
+        feedback: feedback ? { create: feedback } : undefined,
+        blockers: { create: blockerIds.map((blockerId) => ({ blockerId })) }
+      },
+      include: { pauses: true, feedback: true, blockers: { include: { blocker: true } } }
+    })
+
+    await tx.entryAuditEvent.create({
+      data: {
+        entryId,
+        userId,
+        eventType: 'entry_edited',
+        changes: { before, after: auditEntrySnapshot(saved) }
+      }
+    })
+    return saved
+  })
+
+  await refreshDerivedRecords(userId)
+  return mapEntry(updated)
+}
+
+function auditEntrySnapshot(entry: {
+  taskId: string
+  startedAt: Date
+  endedAt: Date | null
+  durationSeconds: number
+  idleSeconds: number
+  contextSwitches: number
+  locationLabel: string | null
+  pauses: Array<{ startedAt: Date, endedAt: Date }>
+  feedback: { flowQuality: string, efficiencyFeel: string, energy: string, note: string | null } | null
+  blockers: Array<{ blocker: { name: string } }>
+}) {
+  return {
+    taskId: entry.taskId,
+    startedAt: entry.startedAt.toISOString(),
+    endedAt: entry.endedAt?.toISOString() || null,
+    durationSeconds: entry.durationSeconds,
+    idleSeconds: entry.idleSeconds,
+    contextSwitches: entry.contextSwitches,
+    locationLabel: entry.locationLabel,
+    pauses: entry.pauses.map((pause) => ({ startedAt: pause.startedAt.toISOString(), endedAt: pause.endedAt.toISOString() })),
+    feedback: entry.feedback,
+    blockers: entry.blockers.map((row) => row.blocker.name)
+  }
 }
 
 export async function updateProfile(userId: string, input: { displayName?: string, team?: string }) {

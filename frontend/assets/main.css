@@ -1294,6 +1294,36 @@ a {
   padding: 12px;
 }
 
+.entry-edit-modal {
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+}
+
+.entry-edit-modal fieldset {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px;
+}
+
+.entry-edit-modal legend {
+  color: var(--text-mid);
+  font-weight: 800;
+  padding: 0 6px;
+}
+
+.entry-edit-modal .check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.entry-edit-modal .check input {
+  width: auto;
+}
+
 .feedback-modal legend {
   color: var(--text-mid);
   font-weight: 800;
