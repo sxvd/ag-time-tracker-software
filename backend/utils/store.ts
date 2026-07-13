@@ -356,8 +356,10 @@ export async function publicState(userId = 'u1', team = 'All') {
     prisma.settings.findUnique({ where: { userId } })
   ])
 
-  const visibleTaskIds = visibleTasks.map((task) => task.id)
-  const entries = await loadVisibleEntries(userId, visibleTaskIds)
+  const entryAccessibleTaskIds = visibleTasks
+    .filter((task) => task.ownerId === userId || task.members.some((member) => member.userId === userId))
+    .map((task) => task.id)
+  const entries = await loadVisibleEntries(userId, entryAccessibleTaskIds)
   const signedInUsersById = new Map(activeSessions.map((session) => [session.user.id, mapUser(session.user)]))
   signedInUsersById.set(user.id, mapUser(user))
 
@@ -547,7 +549,8 @@ export async function acceptTaskInvitation(input: { invitationId: string, userId
   const invitation = await prisma.taskInvite.findFirst({
     where: {
       id: input.invitationId,
-      recipientId: input.userId
+      recipientId: input.userId,
+      status: 'pending'
     },
     include: { task: { include: { members: true } } }
   })
