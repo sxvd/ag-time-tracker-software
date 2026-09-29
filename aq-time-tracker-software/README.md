@@ -1,5 +1,12 @@
 # AirGradient Time Tracker
 
+> **Legacy reference — not for production.**
+>
+> This React/Vite application, its Node/SQLite API, and its browser local-storage
+> standalone mode are retained only as historical reference. Production builds,
+> migrations, seeds, tests, and deployments must use the root Nuxt/PostgreSQL
+> application and must not run commands from this directory.
+
 React/Vite time-tracking demo with a small Node API and SQLite-backed sessions.
 
 ## Project layout

@@ -1,5 +1,10 @@
 # AirGradient Tools Deploy Runbook Implementation Plan
 
+> Historical implementation plan. Its moving-branch shortcut commands and
+> checkout-local `version.json` step are superseded. The mandatory current
+> procedure is `docs/operations/production-runbook.md` with an external
+> protected backup and the full reviewed candidate SHA.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Deploy the current AirGradient Time Tracker repository to the existing `tools.airgradient.net` Docker host at `https://tools.airgradient.net/aq-time-tracker`.

@@ -7,20 +7,29 @@
     "build": "nuxt build",
     "generate": "nuxt generate",
     "preview": "nuxt preview",
+    "test:prepare": "nuxt prepare",
+    "pretest": "npm run test:prepare",
     "test": "vitest run",
+    "pretest:component": "npm run test:prepare",
+    "test:component": "vitest run --config vitest.component.config.ts",
+    "pretest:integration": "npm run test:prepare",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
     "lint": "nuxt typecheck",
-    "db:seed": "prisma db seed"
+    "verify:production": "node scripts/verify-production-config.mjs",
+    "db:seed": "prisma db seed",
+    "audit:production": "npm audit --omit=dev --audit-level=high"
   },
   "prisma": {
     "schema": "backend/prisma/schema.prisma",
     "seed": "node backend/prisma/seed.mjs"
   },
   "dependencies": {
+    "@heroicons/vue": "2.2.0",
     "@prisma/client": "^6.9.0",
     "chart.js": "^4.4.9",
-    "nuxt": "^3.17.5",
+    "nuxt": "3.21.10",
     "prisma": "^6.9.0",
-    "vue": "^3.5.16",
+    "vue": "3.5.41",
     "vue-chartjs": "^5.3.2"
   },
   "devDependencies": {
@@ -30,6 +39,7 @@
     "happy-dom": "^17.6.3",
     "playwright-core": "^1.52.0",
     "typescript": "^5.8.3",
-    "vitest": "^3.2.2"
+    "vitest": "^3.2.2",
+    "vue-tsc": "^3.2.5"
   }
 }

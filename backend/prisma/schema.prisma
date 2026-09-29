@@ -30,6 +30,7 @@ model User {
   nudges             BreezyNudge[]
   breezyDays         BreezyDay[]
   medals             UserMedal[]
+  derivedRefreshJob  DerivedRefreshJob?
   exports            Export[]
 
   @@map("users")
@@ -95,7 +96,6 @@ model Task {
   client          Client?     @relation(fields: [clientId], references: [id])
   projectId       String?     @map("project_id")
   project         Project?    @relation(fields: [projectId], references: [id])
-  estimateMinutes Int?        @map("estimate_minutes")
   ownerId         String      @map("owner_id")
   owner           User        @relation("TaskOwner", fields: [ownerId], references: [id])
   isShared        Boolean     @default(false) @map("is_shared")
@@ -143,6 +143,7 @@ model TaskInvite {
 }
 
 model TimeEntry {
+  // PostgreSQL migration 0003 enforces one active row per user with a partial unique index.
   id              String          @id @default(cuid())
   taskId          String          @map("task_id")
   task            Task            @relation(fields: [taskId], references: [id])
@@ -153,12 +154,14 @@ model TimeEntry {
   durationSeconds Int             @map("duration_seconds")
   isManual        Boolean         @default(false) @map("is_manual")
   idleSeconds     Int             @default(0) @map("idle_seconds")
+  excludedIdleSeconds Int         @default(0) @map("excluded_idle_seconds")
   contextSwitches Int             @default(0) @map("context_switches")
   locationLabel   String?         @map("location_label")
   createdAt       DateTime        @default(now()) @map("created_at")
   updatedAt       DateTime        @updatedAt @map("updated_at")
   isEdited        Boolean         @default(false) @map("is_edited")
   pauses          EntryPause[]
+  idleDecisions   EntryIdleDecision[]
   feedback        EntryFeedback?
   blockers        EntryBlocker[]
   nudges          BreezyNudge[]
@@ -190,10 +193,24 @@ model EntryPause {
   entryId         String    @map("entry_id")
   entry           TimeEntry @relation(fields: [entryId], references: [id])
   startedAt       DateTime  @map("started_at")
-  endedAt         DateTime  @map("ended_at")
-  durationSeconds Int       @map("duration_seconds")
+  endedAt         DateTime? @map("ended_at")
+  durationSeconds Int?      @map("duration_seconds")
 
   @@map("entry_pauses")
+}
+
+model EntryIdleDecision {
+  entryId      String    @map("entry_id")
+  decisionId   String    @map("decision_id")
+  entry        TimeEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  decision     String
+  startedAt    DateTime  @map("started_at")
+  endedAt      DateTime  @map("ended_at")
+  idleSeconds  Int       @map("idle_seconds")
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  @@id([entryId, decisionId])
+  @@map("entry_idle_decisions")
 }
 
 model EntryFeedback {
@@ -230,7 +247,7 @@ model Settings {
   userId                 String  @id @map("user_id")
   user                   User    @relation(fields: [userId], references: [id])
   idleThresholdMinutes   Int     @default(5) @map("idle_threshold_minutes")
-  nudgeCadenceMinutes    Int     @default(90) @map("nudge_cadence_minutes")
+  nudgeCadenceMinutes    Int     @default(50) @map("nudge_cadence_minutes")
   breezyVerbosity        String  @default("gentle") @map("breezy_verbosity")
   muted                  Boolean @default(false)
   locationEnabled        Boolean @default(false) @map("location_enabled")
@@ -299,6 +316,17 @@ model UserMedal {
 
   @@id([userId, medalId])
   @@map("user_medals")
+}
+
+model DerivedRefreshJob {
+  userId       String    @id @map("user_id")
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  requestedAt  DateTime  @default(now()) @map("requested_at")
+  attemptCount Int       @default(0) @map("attempt_count")
+  lastError    String?   @map("last_error")
+  completedAt  DateTime? @map("completed_at")
+
+  @@map("derived_refresh_jobs")
 }
 
 model Export {

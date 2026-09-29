@@ -15,6 +15,7 @@
       --sky-line: #a9d9f0;
       --blue: #1C75BC;
       --blue-2: #1499cf;
+      --orange: #fc7e10;
       --teal: #19a891;
       --green: #45b979;
       --gold: #e5a844;
@@ -169,6 +170,8 @@
 
     .view { display: none; }
     .view.active { display: block; }
+    .view.dashboard.active { display: grid; }
+    .view.dashboard:not(.active) { display: none; }
     .workbench {
       display: grid;
       grid-template-columns: minmax(0, 1.1fr) minmax(360px, 0.9fr);
@@ -269,13 +272,15 @@
     }
     .session-row small { color: var(--muted); font-weight: 800; }
 
-    .dashboard { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    .dashboard { grid-template-columns: repeat(3, minmax(0, 1fr)); }
     .metric span { color: var(--muted); font-weight: 900; }
     .metric strong { display: block; margin-top: 4px; font-size: 2rem; }
     .wide { grid-column: span 2; }
+    .chart-filter { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 0.88rem; }
+    .chart-filter select { min-width: 150px; }
     .chart-placeholder {
       display: grid;
-      align-items: end;
+      align-items: stretch;
       grid-template-columns: repeat(6, 1fr);
       gap: 10px;
       height: 220px;
@@ -283,7 +288,30 @@
       background: linear-gradient(180deg, #f8fcff, #eef8ff);
       padding: 18px;
     }
-    .chart-placeholder i { display: block; border-radius: 8px 8px 0 0; background: var(--blue); }
+    .chart-column { display: grid; grid-template-rows: 1fr auto auto; gap: 6px; min-width: 0; text-align: center; }
+    .chart-column i { display: block; align-self: end; width: 100%; min-height: 4px; border-radius: 8px 8px 0 0; background: var(--blue); }
+    .chart-column strong { overflow: hidden; color: var(--ink); font-size: 0.78rem; text-overflow: ellipsis; white-space: nowrap; }
+    .chart-column small { color: var(--muted); font-size: 0.75rem; font-weight: 800; }
+    .dashboard-card-copy { margin: -4px 0 2px; color: var(--muted); font-size: 0.88rem; font-weight: 700; }
+    .dashboard-list { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }
+    .dashboard-list li, .signal-row, .trend-values {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 12px;
+      align-items: center;
+      border-top: 1px solid #e2f1ff;
+      padding: 10px 0;
+    }
+    .dashboard-list li:first-child, .signal-row:first-of-type { border-top: 0; }
+    .dashboard-list small, .signal-row small, .trend-values small { color: var(--muted); font-weight: 800; }
+    .signal-copy { display: grid; gap: 2px; }
+    .signal-copy strong { color: var(--ink); }
+    .trend-values { grid-template-columns: repeat(4, minmax(0, 1fr)); text-align: center; }
+    .trend-values span { display: grid; gap: 4px; }
+    .breezy-day-value { margin: 0; font-size: 1.55rem; font-weight: 900; }
+    .breezy-day-meta { display: flex; flex-wrap: wrap; gap: 8px; color: var(--muted); font-weight: 800; }
+    .aggregate-value { color: var(--orange); }
+    .company-filter select { width: 100%; }
 
     .forest-card { overflow: hidden; }
     .road-tabs { grid-template-columns: repeat(3, auto); }
@@ -508,10 +536,7 @@
           <h2>Create task</h2>
           <input placeholder="Task title" value="Sensor QA notes">
           <textarea rows="2" placeholder="Description">Consolidate firmware validation notes.</textarea>
-          <div class="inline-fields">
-            <select><option>Deep work</option><option>Meeting</option><option>Research</option></select>
-            <input type="number" value="60">
-          </div>
+          <select aria-label="Task category"><option>Deep work</option><option>Meeting</option><option>Research</option></select>
           <label class="check"><input type="checkbox" checked> Shared task</label>
           <button class="primary-button" type="button">Add task</button>
         </form>
@@ -544,25 +569,129 @@
     </section>
 
     <section id="dashboard" class="view dashboard">
-      <article class="metric"><span>Your hours</span><strong>9.8h</strong></article>
-      <article class="metric"><span>Great flow</span><strong>4</strong></article>
+      <article class="metric"><span>Your hours</span><strong>9 hours 22 minutes</strong></article>
       <article class="metric"><span>Top blocker</span><strong>Context switching</strong></article>
       <article class="metric"><span>Raw data</span><div class="export-actions"><a href="#">CSV</a><a href="#">JSON</a></div></article>
       <article class="wide panel">
-        <h2>Hours by category</h2>
-        <div class="chart-placeholder">
-          <i style="height: 84%"></i><i style="height: 42%"></i><i style="height: 61%"></i><i style="height: 35%"></i><i style="height: 55%"></i><i style="height: 25%"></i>
+        <div class="card-head">
+          <div class="card-title">
+            <h3 id="breakdownTitle">Hours by category</h3>
+            <p id="breakdownUnit">Tracked time · hours</p>
+          </div>
+          <label class="chart-filter" for="breakdownView">View by
+            <select id="breakdownView">
+              <option value="category" selected>Category</option>
+              <option value="task">Task</option>
+              <option value="flow">Flow</option>
+            </select>
+          </label>
+        </div>
+        <div id="breakdownChart" class="chart-placeholder" role="img" aria-live="polite"></div>
+      </article>
+      <article class="panel">
+        <h2>Medals</h2>
+        <p><strong>Steady Breeze</strong></p>
+        <p>Tracked across five sessions.</p>
+        <button class="primary-button" type="button">View medals</button>
+      </article>
+      <article class="wide panel">
+        <div class="card-title">
+          <h3>Weekly trend</h3>
+          <p>Tracked time · hours</p>
+        </div>
+        <div class="trend-values" role="img" aria-label="Weekly tracked hours: March week 1, 4.1 hours; week 2, 5.3 hours; week 3, 3.8 hours; week 4, 6 hours">
+          <span><small>Mar W1</small><strong>4.1h</strong></span>
+          <span><small>Mar W2</small><strong>5.3h</strong></span>
+          <span><small>Mar W3</small><strong>3.8h</strong></span>
+          <span><small>Mar W4</small><strong>6.0h</strong></span>
         </div>
       </article>
       <article class="panel">
-        <h2>Estimate vs actual</h2>
-        <div class="session-row"><strong>PCB layout review</strong><span>79m</span><small>-11m</small></div>
-        <div class="session-row"><strong>Process retro</strong><span>46m</span><small>+1m</small></div>
+        <div class="card-title">
+          <h3>Work signals</h3>
+          <p>Recorded feedback only</p>
+        </div>
+        <div class="signal-row">
+          <div class="signal-copy"><strong>Efficiency</strong><small>Efficient · OK · Wasteful</small></div>
+          <strong>56 · 33 · 11%</strong>
+        </div>
+        <div class="signal-row">
+          <div class="signal-copy"><strong>Energy</strong><small>High · OK · Drained</small></div>
+          <strong>44 · 44 · 11%</strong>
+        </div>
+      </article>
+      <article class="wide panel">
+        <div class="card-title">
+          <h3>Blocker patterns</h3>
+          <p>Affected sessions · associated tracked time</p>
+        </div>
+        <ul class="dashboard-list">
+          <li><strong>Context switching</strong><small>4 sessions · 6.3h</small></li>
+          <li><strong>Waiting on someone</strong><small>2 sessions · 1.4h</small></li>
+          <li><strong>Unclear requirement</strong><small>1 session · 0.8h</small></li>
+        </ul>
       </article>
       <article class="panel">
-        <h2>AI Insights</h2>
-        <p>Reduce context switching during deep work blocks. The company view stays aggregated.</p>
-        <button class="primary-button" type="button">Personal suggestion</button>
+        <div class="card-title">
+          <h3>Breezy day</h3>
+          <p>Your latest saved workday</p>
+        </div>
+        <p class="breezy-day-value">Happy</p>
+        <div class="breezy-day-meta"><span>Air clarity 82/100</span><span>May week 4</span></div>
+        <button class="primary-button" data-view="journey" type="button">Open Breezy Journey</button>
+      </article>
+    </section>
+
+    <section id="companyDashboard" class="view dashboard">
+      <article class="panel company-filter">
+        <label for="companyTeamFilter">Team scope
+          <select id="companyTeamFilter">
+            <option value="All" selected>All</option>
+            <option value="COMMS">COMMS</option>
+            <option value="Hardware">Hardware</option>
+            <option value="Software">Software</option>
+          </select>
+        </label>
+        <p class="dashboard-card-copy">All company results stay aggregated.</p>
+      </article>
+      <article class="metric"><span>Aggregated hours</span><strong id="companyTotal" class="aggregate-value">37.3h</strong></article>
+      <article class="metric"><span>Active shared sessions</span><strong id="companyActive" class="aggregate-value">2</strong></article>
+
+      <article class="wide panel">
+        <div class="card-title">
+          <h3>Aggregated category time</h3>
+          <p>Tracked time · hours</p>
+        </div>
+        <div id="companyCategoryChart" class="chart-placeholder" role="img" aria-live="polite"></div>
+      </article>
+      <article class="panel">
+        <div class="card-title">
+          <h3>Work signals</h3>
+          <p>Recorded feedback only</p>
+        </div>
+        <div class="signal-row">
+          <div class="signal-copy"><strong>Flow</strong><small>Great · Neutral · Friction</small></div>
+          <strong id="companyFlow">48 · 39 · 13%</strong>
+        </div>
+        <div class="signal-row">
+          <div class="signal-copy"><strong>Efficiency</strong><small>Efficient · Manual · Wasteful</small></div>
+          <strong id="companyEfficiency">58 · 31 · 11%</strong>
+        </div>
+      </article>
+
+      <article class="wide panel">
+        <div class="card-title">
+          <h3>Context switches</h3>
+          <p>Average switches / completed session</p>
+        </div>
+        <div id="companyContextTrend" class="trend-values" role="img" aria-live="polite"></div>
+      </article>
+      <article class="panel">
+        <div class="card-title">
+          <h3>Blocker patterns</h3>
+          <p>Affected sessions · associated tracked time</p>
+        </div>
+        <ul id="companyBlockers" class="dashboard-list"></ul>
       </article>
     </section>
 
@@ -620,6 +749,7 @@
     const views = {
       track: document.getElementById("track"),
       dashboard: document.getElementById("dashboard"),
+      companyDashboard: document.getElementById("companyDashboard"),
       journey: document.getElementById("journey")
     };
     const heroTitle = document.getElementById("heroTitle");
@@ -631,10 +761,140 @@
     let seconds = 0;
     let timerId;
 
+    const breakdowns = {
+      category: {
+        title: "Hours by category",
+        unit: "Tracked time · hours",
+        description: "Tracked hours grouped by category",
+        items: [["Software", 4.2, "4.2h"], ["Communication", 2.1, "2.1h"], ["Research", 1.3, "1.3h"], ["Hardware", 1.1, "1.1h"], ["Production", 0.7, "0.7h"]]
+      },
+      task: {
+        title: "Hours by task",
+        unit: "Tracked time · hours",
+        description: "Tracked hours grouped by task",
+        items: [["PCB review", 3.4, "3.4h"], ["QA notes", 2.5, "2.5h"], ["Process retro", 1.8, "1.8h"], ["Release prep", 1.2, "1.2h"], ["Research", 0.9, "0.9h"]]
+      },
+      flow: {
+        title: "Sessions by flow",
+        unit: "Completed sessions · count and percent",
+        description: "Completed sessions grouped by recorded flow feedback",
+        items: [["Great flow", 4, "4 · 44%"], ["Neutral", 3, "3 · 33%"], ["Friction", 2, "2 · 22%"]]
+      }
+    };
+
+    const breakdownView = document.getElementById("breakdownView");
+    const breakdownChart = document.getElementById("breakdownChart");
+
+    function renderColumnChart(container, items, description, color = "var(--blue)") {
+      const maximum = Math.max(...items.map((item) => item[1]), 1);
+      container.setAttribute("aria-label", description);
+      container.style.gridTemplateColumns = `repeat(${items.length}, minmax(0, 1fr))`;
+      container.replaceChildren(...items.map(([label, value, display]) => {
+        const column = document.createElement("div");
+        column.className = "chart-column";
+        const bar = document.createElement("i");
+        bar.style.height = `${Math.max(5, Math.round((value / maximum) * 100))}%`;
+        bar.style.background = color;
+        const name = document.createElement("strong");
+        name.textContent = label;
+        const amount = document.createElement("small");
+        amount.textContent = display;
+        column.append(bar, name, amount);
+        return column;
+      }));
+    }
+
+    function renderBreakdown() {
+      const selected = breakdowns[breakdownView.value];
+      document.getElementById("breakdownTitle").textContent = selected.title;
+      document.getElementById("breakdownUnit").textContent = selected.unit;
+      renderColumnChart(breakdownChart, selected.items, selected.description);
+    }
+
+    breakdownView.addEventListener("change", renderBreakdown);
+    renderBreakdown();
+
+    const companyProfiles = {
+      All: {
+        total: "37.3h",
+        active: "2",
+        categories: [["Software", 20.1, "20.1h"], ["Firmware", 16.2, "16.2h"], ["Hardware", 1, "1.0h"]],
+        flow: "48 · 39 · 13%",
+        efficiency: "58 · 31 · 11%",
+        context: [["Mar W1", "1.8"], ["Mar W2", "1.4"], ["Mar W3", "1.1"], ["Mar W4", "1.3"]],
+        blockers: [["Context switching", "4 sessions · 6.3h"], ["Waiting on someone", "2 sessions · 1.4h"], ["Meetings overran", "1 session · 0.8h"]]
+      },
+      COMMS: {
+        total: "8.4h",
+        active: "0",
+        categories: [["Communication", 6.8, "6.8h"], ["Research", 1.6, "1.6h"]],
+        flow: "36 · 50 · 14%",
+        efficiency: "43 · 43 · 14%",
+        context: [["Mar W1", "2.2"], ["Mar W2", "1.9"], ["Mar W3", "1.6"], ["Mar W4", "1.5"]],
+        blockers: [["Waiting on someone", "2 sessions · 1.4h"], ["Meetings overran", "1 session · 0.8h"]]
+      },
+      Hardware: {
+        total: "8.9h",
+        active: "1",
+        categories: [["Hardware", 6.7, "6.7h"], ["Firmware", 2.2, "2.2h"]],
+        flow: "55 · 36 · 9%",
+        efficiency: "64 · 27 · 9%",
+        context: [["Mar W1", "1.4"], ["Mar W2", "1.2"], ["Mar W3", "1.0"], ["Mar W4", "0.9"]],
+        blockers: [["Tool was slow", "2 sessions · 2.1h"], ["Unclear requirements", "1 session · 0.7h"]]
+      },
+      Software: {
+        total: "20.0h",
+        active: "1",
+        categories: [["Software", 18.7, "18.7h"], ["Hardware", 1.1, "1.1h"], ["Communication", 0.2, "0.2h"]],
+        flow: "52 · 38 · 10%",
+        efficiency: "62 · 29 · 9%",
+        context: [["Mar W1", "1.7"], ["Mar W2", "1.3"], ["Mar W3", "1.0"], ["Mar W4", "1.1"]],
+        blockers: [["Context switching", "3 sessions · 4.9h"], ["Unclear requirements", "1 session · 0.8h"]]
+      }
+    };
+
+    const companyTeamFilter = document.getElementById("companyTeamFilter");
+    const companyCategoryChart = document.getElementById("companyCategoryChart");
+
+    function renderCompanyDashboard() {
+      const selected = companyProfiles[companyTeamFilter.value];
+      document.getElementById("companyTotal").textContent = selected.total;
+      document.getElementById("companyActive").textContent = selected.active;
+      document.getElementById("companyFlow").textContent = selected.flow;
+      document.getElementById("companyEfficiency").textContent = selected.efficiency;
+      renderColumnChart(companyCategoryChart, selected.categories, `Aggregated category hours for ${companyTeamFilter.value}`, "var(--orange)");
+
+      const trend = document.getElementById("companyContextTrend");
+      trend.setAttribute("aria-label", `Average context switches per completed session for ${companyTeamFilter.value}: ${selected.context.map(([week, amount]) => `${week} ${amount}`).join("; ")}`);
+      trend.replaceChildren(...selected.context.map(([week, amount]) => {
+        const point = document.createElement("span");
+        const label = document.createElement("small");
+        label.textContent = week;
+        const value = document.createElement("strong");
+        value.textContent = amount;
+        point.append(label, value);
+        return point;
+      }));
+
+      const blockers = document.getElementById("companyBlockers");
+      blockers.replaceChildren(...selected.blockers.map(([name, detail]) => {
+        const item = document.createElement("li");
+        const label = document.createElement("strong");
+        label.textContent = name;
+        const value = document.createElement("small");
+        value.textContent = detail;
+        item.append(label, value);
+        return item;
+      }));
+    }
+
+    companyTeamFilter.addEventListener("change", renderCompanyDashboard);
+    renderCompanyDashboard();
+
     function showView(name) {
       Object.entries(views).forEach(([key, el]) => el.classList.toggle("active", key === name));
-      viewButtons.forEach((button) => button.classList.toggle("active", button.dataset.view === name));
-      heroTitle.textContent = name === "journey" ? "Breezy Journey" : name === "dashboard" ? (audience === "you" ? "Your Dashboard" : "Company Dashboard") : "Track";
+      viewButtons.forEach((button) => button.classList.toggle("active", button.dataset.view === name || (button.dataset.view === "dashboard" && name === "companyDashboard")));
+      heroTitle.textContent = name === "journey" ? "Breezy Journey" : name === "companyDashboard" ? "Company Dashboard" : name === "dashboard" ? "Your Dashboard" : "Track";
       scopeLabel.textContent = audience === "you" ? "Personal - private" : "Aggregated - process";
     }
 
@@ -642,12 +902,12 @@
       button.addEventListener("click", () => {
         audience = button.dataset.audience;
         audienceButtons.forEach((item) => item.classList.toggle("selected", item === button));
-        showView(audience === "company" ? "dashboard" : "track");
+        showView(audience === "company" ? "companyDashboard" : "track");
       });
     });
 
     viewButtons.forEach((button) => {
-      button.addEventListener("click", () => showView(button.dataset.view));
+      button.addEventListener("click", () => showView(button.dataset.view === "dashboard" && audience === "company" ? "companyDashboard" : button.dataset.view));
     });
 
     entryButtons.forEach((button) => {

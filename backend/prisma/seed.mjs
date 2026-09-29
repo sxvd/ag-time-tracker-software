@@ -1,6 +1,8 @@
 import { PrismaClient } from '@prisma/client'
 import { randomBytes, scrypt as scryptCallback } from 'node:crypto'
 import { promisify } from 'node:util'
+import { awardMedalsFromSessions, deriveBreezyDayFromSessions } from '../../shared/utils/breezy.mjs'
+import { DEFAULT_CATEGORY_NAMES } from '../../shared/constants/categories.mjs'
 
 const prisma = new PrismaClient()
 const scrypt = promisify(scryptCallback)
@@ -42,35 +44,6 @@ function secondsBetween(startedAt, endedAt) {
 function calculateDuration(startedAt, endedAt, pauses = [], idleSeconds = 0) {
   const pauseSeconds = pauses.reduce((sum, pause) => sum + secondsBetween(pause.startedAt, pause.endedAt), 0)
   return Math.max(0, secondsBetween(startedAt, endedAt) - pauseSeconds - idleSeconds)
-}
-
-function deriveBreezyDay(sessions) {
-  const trackedHours = sessions.reduce((sum, session) => sum + session.durationSeconds, 0) / 3600
-  const greatFlow = sessions.filter((session) => session.flowQuality === 'Great flow').length
-  const friction = sessions.filter((session) => session.flowQuality === 'Friction').length
-  const switches = sessions.reduce((sum, session) => sum + session.contextSwitches, 0)
-  const blockers = sessions.reduce((sum, session) => sum + (session.blockers?.filter((blocker) => blocker !== 'None').length || 0), 0)
-  const breaks = sessions.reduce((sum, session) => sum + session.idleSeconds, 0)
-  const airClarityScore = Math.max(30, Math.min(100, Math.round(70 + greatFlow * 8 + Math.min(breaks / 300, 10) - friction * 9 - switches * 1.5 - blockers * 5)))
-  let mood = 'idle'
-  if (airClarityScore >= 86 && trackedHours > 0) mood = 'cheering'
-  else if (airClarityScore >= 74) mood = 'happy'
-  else if (airClarityScore >= 55) mood = 'waving'
-  else mood = 'sleepy'
-  return { mood, airClarityScore }
-}
-
-function awardMedals(sessions) {
-  const totalSeconds = sessions.reduce((sum, session) => sum + session.durationSeconds, 0)
-  const blockers = sessions.flatMap((session) => session.blockers || [])
-  const medals = new Set()
-  if (sessions.some((session) => session.flowQuality === 'Great flow')) medals.add('flow-state')
-  if (sessions.length >= 5) medals.add('steady-breeze')
-  if (totalSeconds >= 8 * 3600) medals.add('in-the-zone')
-  if (blockers.some((blocker) => blocker !== 'None')) medals.add('straight-shooter')
-  if (sessions.some((session) => session.idleSeconds >= 300)) medals.add('sustainable-pace')
-  if (sessions.some((session) => session.contextSwitches <= 1 && session.durationSeconds >= 1800)) medals.add('single-tasker')
-  return [...medals]
 }
 
 async function hashPassword(password) {
@@ -152,7 +125,7 @@ function seededEntries() {
 }
 
 async function main() {
-  const demoPasswordHash = await hashPassword('demo')
+  const demoPasswordHash = await hashPassword('demo-password')
 
   await prisma.user.upsert({
     where: { id: 'u1' },
@@ -166,11 +139,11 @@ async function main() {
   })
   await prisma.user.upsert({
     where: { id: 'u3' },
-    update: { email: 'jay@airgradient.com', displayName: 'Jay', team: 'COMMS', passwordHash: demoPasswordHash },
-    create: { id: 'u3', email: 'jay@airgradient.com', displayName: 'Jay', team: 'COMMS', passwordHash: demoPasswordHash }
+    update: { email: 'jay@airgradient.com', displayName: 'Jay', team: 'Communication', passwordHash: demoPasswordHash },
+    create: { id: 'u3', email: 'jay@airgradient.com', displayName: 'Jay', team: 'Communication', passwordHash: demoPasswordHash }
   })
 
-  for (const [index, name] of ['Deep work', 'Meeting', 'Admin', 'Comms', 'Research', 'Other'].entries()) {
+  for (const [index, name] of DEFAULT_CATEGORY_NAMES.entries()) {
     await prisma.category.upsert({
       where: { id: `c${index + 1}` },
       update: { ownerId: null, name },
@@ -201,16 +174,16 @@ async function main() {
   })
 
   const tasks = [
-    ['t1', 'Deep work: PCB layout review', 'Review board layout feedback and note open questions.', 'c1', 'cl1', 'p1', 90, 'u1', true, iso(20, 8)],
-    ['t2', 'Weekly process retro', 'Surface workflow friction from the past week.', 'c2', 'cl1', 'p1', 45, 'u1', true, iso(12, 9)],
-    ['t3', 'Sensor QA notes', 'Consolidate firmware validation notes.', 'c5', 'cl1', 'p2', 120, 'u2', false, iso(8, 10)]
+    ['t1', 'PCB layout review', 'Review board layout feedback and note open questions.', 'c2', 'cl1', 'p1', 'u1', true, iso(20, 8)],
+    ['t2', 'Weekly process retro', 'Surface workflow friction from the past week.', 'c4', 'cl1', 'p1', 'u1', true, iso(12, 9)],
+    ['t3', 'Sensor QA notes', 'Consolidate firmware validation notes.', 'c3', 'cl1', 'p2', 'u2', false, iso(8, 10)]
   ]
 
-  for (const [id, title, description, categoryId, clientId, projectId, estimateMinutes, ownerId, isShared, createdAt] of tasks) {
+  for (const [id, title, description, categoryId, clientId, projectId, ownerId, isShared, createdAt] of tasks) {
     await prisma.task.upsert({
       where: { id },
-      update: { title, description, categoryId, clientId, projectId, estimateMinutes, ownerId, isShared, isArchived: false, createdAt: new Date(createdAt) },
-      create: { id, title, description, categoryId, clientId, projectId, estimateMinutes, ownerId, isShared, isArchived: false, createdAt: new Date(createdAt) }
+      update: { title, description, categoryId, clientId, projectId, ownerId, isShared, isArchived: false, createdAt: new Date(createdAt) },
+      create: { id, title, description, categoryId, clientId, projectId, ownerId, isShared, isArchived: false, createdAt: new Date(createdAt) }
     })
   }
 
@@ -244,7 +217,7 @@ async function main() {
     where: { userId: 'u1' },
     update: {
       idleThresholdMinutes: 5,
-      nudgeCadenceMinutes: 90,
+      nudgeCadenceMinutes: 50,
       breezyVerbosity: 'gentle',
       muted: false,
       locationEnabled: false,
@@ -254,7 +227,7 @@ async function main() {
     create: {
       userId: 'u1',
       idleThresholdMinutes: 5,
-      nudgeCadenceMinutes: 90,
+      nudgeCadenceMinutes: 50,
       breezyVerbosity: 'gentle',
       muted: false,
       locationEnabled: false,
@@ -275,6 +248,7 @@ async function main() {
         durationSeconds: entry.durationSeconds,
         isManual: entry.isManual,
         idleSeconds: entry.idleSeconds,
+        excludedIdleSeconds: entry.idleSeconds,
         contextSwitches: entry.contextSwitches,
         locationLabel: entry.locationLabel,
         createdAt: new Date(entry.createdAt)
@@ -288,6 +262,7 @@ async function main() {
         durationSeconds: entry.durationSeconds,
         isManual: entry.isManual,
         idleSeconds: entry.idleSeconds,
+        excludedIdleSeconds: entry.idleSeconds,
         contextSwitches: entry.contextSwitches,
         locationLabel: entry.locationLabel,
         createdAt: new Date(entry.createdAt)
@@ -331,13 +306,14 @@ async function main() {
       days.set(key, [...(days.get(key) || []), entry])
     }
     for (const [date, dayEntries] of days.entries()) {
-      const derived = deriveBreezyDay(dayEntries.map((entry) => ({
+      const derived = deriveBreezyDayFromSessions(dayEntries.map((entry) => ({
         durationSeconds: entry.durationSeconds,
         flowQuality: entry.feedback.flowQuality,
         efficiencyFeel: entry.feedback.efficiencyFeel,
         energy: entry.feedback.energy,
         blockers: entry.blockers,
         idleSeconds: entry.idleSeconds,
+        breakSeconds: entry.pauses.reduce((sum, pause) => sum + secondsBetween(pause.startedAt, pause.endedAt), 0),
         contextSwitches: entry.contextSwitches
       })))
       await prisma.breezyDay.upsert({
@@ -347,13 +323,14 @@ async function main() {
       })
     }
 
-    const awardedCodes = awardMedals(userEntries.map((entry) => ({
+    const awardedCodes = awardMedalsFromSessions(userEntries.map((entry) => ({
       durationSeconds: entry.durationSeconds,
       flowQuality: entry.feedback.flowQuality,
       efficiencyFeel: entry.feedback.efficiencyFeel,
       energy: entry.feedback.energy,
       blockers: entry.blockers,
       idleSeconds: entry.idleSeconds,
+      breakSeconds: entry.pauses.reduce((sum, pause) => sum + secondsBetween(pause.startedAt, pause.endedAt), 0),
       contextSwitches: entry.contextSwitches
     })))
     await prisma.userMedal.deleteMany({ where: { userId } })

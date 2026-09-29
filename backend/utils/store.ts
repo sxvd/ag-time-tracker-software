@@ -1,6 +1,14 @@
-import { awardMedals, calculateDuration, deriveBreezyDay, toCsv } from '../../shared/utils/time'
-import type { EfficiencyFeel, EnergyLevel, FlowQuality, PauseWindow } from '../../shared/utils/time'
+import { calculateDuration, deriveBreezyDay, toCsv } from '../../shared/utils/time'
+import type { ClosedPauseWindow, EfficiencyFeel, EnergyLevel, FlowQuality } from '../../shared/utils/time'
+import type { AccountSettingsInput } from '../../shared/types/account-settings'
+import { SYSTEM_BREEZY_SETTINGS } from '../../shared/constants/account-settings.mjs'
+import { DEFAULT_CATEGORY_NAMES } from '../../shared/constants/categories.mjs'
+import { Prisma } from '@prisma/client'
+import { enqueueDerivedRefresh, processDerivedRefresh } from './derived-refresh'
+import { mapBreezyNudge } from './breezy-nudges'
 import { prisma } from './prisma'
+import { optionalString, pauseWindows } from './validation'
+import { lockActiveEntry } from './timer-lock'
 
 export interface User {
   id: string
@@ -15,9 +23,9 @@ export interface TaskInput {
   categoryId?: string
   clientId?: string
   projectId?: string
-  estimateMinutes?: number
   ownerId?: string
   members?: string[]
+  requireInvitees?: boolean
 }
 
 export interface TimeEntryInput {
@@ -30,6 +38,13 @@ export interface TimeEntryInput {
   locationLabel?: string
   feedback?: EntryFeedbackInput
   blockers?: string[]
+  pauses?: ClosedPauseWindow[]
+}
+
+export interface StartEntryInput {
+  taskId: string
+  userId: string
+  locationLabel?: string
 }
 
 export interface EntryFeedbackInput {
@@ -39,7 +54,6 @@ export interface EntryFeedbackInput {
   note: string
 }
 
-const defaultCategories = ['Deep work', 'Meeting', 'Admin', 'Comms', 'Research', 'Other']
 const defaultBlockers = ['Waiting on someone', 'Tool was slow or broke', 'Unclear requirements', 'Interruptions', 'Context switching', 'Meetings overran', 'None']
 const flowValues = ['Great flow', 'Neutral', 'Friction']
 const efficiencyValues = ['Felt efficient', 'Felt manual', 'Felt wasteful']
@@ -47,9 +61,7 @@ const energyValues = ['High', 'OK', 'Drained']
 
 const defaultSettings = {
   idleThresholdMinutes: 5,
-  nudgeCadenceMinutes: 90,
-  breezyVerbosity: 'gentle',
-  muted: false,
+  ...SYSTEM_BREEZY_SETTINGS,
   locationEnabled: false,
   activityEnabled: true,
   locationLabels: ['Home office', 'AirGradient office']
@@ -90,10 +102,32 @@ function compactOptionalId(value?: string) {
   return trimmed || null
 }
 
+async function resolveNewLocationLabel(userId: string, requested?: string) {
+  const requestedLocation = String(requested || '').trim()
+  if (!requestedLocation) return null
+  const settings = await prisma.settings.findUnique({ where: { userId } })
+  if (!settings?.locationEnabled) return null
+  const allowedLabels = Array.isArray(settings.locationLabels)
+    ? settings.locationLabels.filter((label): label is string => typeof label === 'string')
+    : []
+  if (!allowedLabels.includes(requestedLocation)) {
+    throw createError({ statusCode: 400, statusMessage: 'Select one of your saved location labels.' })
+  }
+  return requestedLocation
+}
+
 function mapUser(user: { id: string, email: string, displayName: string, team: string }) {
   return {
     id: user.id,
     email: user.email,
+    displayName: user.displayName,
+    team: user.team
+  }
+}
+
+function mapCollaborator(user: { id: string, displayName: string, team: string }) {
+  return {
+    id: user.id,
     displayName: user.displayName,
     team: user.team
   }
@@ -106,7 +140,6 @@ function mapTask(task: {
   categoryId: string
   clientId: string | null
   projectId: string | null
-  estimateMinutes: number | null
   ownerId: string
   isShared: boolean
   isArchived: boolean
@@ -121,7 +154,6 @@ function mapTask(task: {
     categoryId: task.categoryId,
     clientId: task.clientId || undefined,
     projectId: task.projectId || undefined,
-    estimateMinutes: task.estimateMinutes || undefined,
     ownerId: task.ownerId,
     isShared: task.isShared,
     isArchived: task.isArchived,
@@ -160,10 +192,11 @@ function mapEntry(entry: {
   isManual: boolean
   isEdited: boolean
   idleSeconds: number
+  excludedIdleSeconds: number
   contextSwitches: number
   locationLabel: string | null
   createdAt: Date
-  pauses: { startedAt: Date, endedAt: Date }[]
+  pauses: { startedAt: Date, endedAt: Date | null, durationSeconds: number | null }[]
   feedback: { flowQuality: string, efficiencyFeel: string, energy: string, note: string | null } | null
   blockers: { blocker: { name: string } }[]
 }) {
@@ -177,11 +210,13 @@ function mapEntry(entry: {
     isManual: entry.isManual,
     isEdited: entry.isEdited,
     idleSeconds: entry.idleSeconds,
+    excludedIdleSeconds: entry.excludedIdleSeconds,
     contextSwitches: entry.contextSwitches,
     locationLabel: entry.locationLabel || '',
     pauses: entry.pauses.map((pause) => ({
       startedAt: pause.startedAt.toISOString(),
-      endedAt: pause.endedAt.toISOString()
+      endedAt: pause.endedAt?.toISOString() || null,
+      durationSeconds: pause.durationSeconds
     })),
     feedback: entry.feedback
       ? {
@@ -211,7 +246,7 @@ function validateFeedback(feedback?: EntryFeedbackInput) {
     flowQuality: feedback.flowQuality,
     efficiencyFeel: feedback.efficiencyFeel,
     energy: feedback.energy,
-    note: String(feedback.note || '')
+    note: optionalString('feedback.note', feedback.note, { max: 2_000 }) || ''
   }
 }
 
@@ -227,7 +262,7 @@ export function canTrackTask(task: { ownerId: string, members: string[] }, userI
 }
 
 async function ensureReferenceData(createdByUserId: string) {
-  for (const [index, name] of defaultCategories.entries()) {
+  for (const [index, name] of DEFAULT_CATEGORY_NAMES.entries()) {
     await prisma.category.upsert({
       where: { id: `c${index + 1}` },
       update: { ownerId: null, name },
@@ -316,14 +351,9 @@ async function loadVisibleTasks(userId: string) {
   })
 }
 
-async function loadVisibleEntries(userId: string, visibleTaskIds: string[]) {
+async function loadOwnedEntries(userId: string) {
   return prisma.timeEntry.findMany({
-    where: {
-      OR: [
-        { userId },
-        { taskId: { in: visibleTaskIds }, task: { isShared: true } }
-      ]
-    },
+    where: { userId },
     include: {
       pauses: true,
       feedback: true,
@@ -333,9 +363,55 @@ async function loadVisibleEntries(userId: string, visibleTaskIds: string[]) {
   })
 }
 
-export async function publicState(userId = 'u1', team = 'All') {
+async function loadSharedTaskEffort(userId: string) {
+  const tasks = await prisma.task.findMany({
+    where: {
+      isShared: true,
+      OR: [
+        { ownerId: userId },
+        { members: { some: { userId } } }
+      ]
+    },
+    select: {
+      id: true,
+      title: true,
+      members: {
+        select: {
+          role: true,
+          userId: true,
+          user: { select: { displayName: true } }
+        }
+      },
+      entries: {
+        where: { userId, endedAt: { not: null } },
+        select: {
+          durationSeconds: true
+        }
+      }
+    },
+    orderBy: { createdAt: 'desc' }
+  })
+
+  return tasks.map((task) => ({
+    taskId: task.id,
+    taskTitle: task.title,
+    myDurationSeconds: task.entries.reduce((sum, entry) => sum + entry.durationSeconds, 0),
+    members: task.members
+      .map((member) => ({
+        userId: member.userId,
+        displayName: member.user.displayName,
+        role: member.role as 'owner' | 'member'
+      }))
+      .sort((left, right) => {
+        if (left.role !== right.role) return left.role === 'owner' ? -1 : 1
+        return left.displayName.localeCompare(right.displayName)
+      })
+  }))
+}
+
+export async function publicState(userId = 'u1') {
   await ensureReferenceData(userId)
-  const [user, users, activeSessions, invitations, categories, clients, projects, blockers, visibleTasks, settings] = await Promise.all([
+  const [user, users, activeSessions, invitations, categories, clients, projects, blockers, visibleTasks, settings, breezyNudges] = await Promise.all([
     prisma.user.findUniqueOrThrow({ where: { id: userId } }),
     prisma.user.findMany({ orderBy: { displayName: 'asc' } }),
     prisma.authSession.findMany({
@@ -353,17 +429,20 @@ export async function publicState(userId = 'u1', team = 'All') {
     prisma.project.findMany({ orderBy: { name: 'asc' } }),
     prisma.blocker.findMany({ orderBy: { id: 'asc' } }),
     loadVisibleTasks(userId),
-    prisma.settings.findUnique({ where: { userId } })
+    prisma.settings.findUnique({ where: { userId } }),
+    loadRecentBreezyNudges(userId)
   ])
 
-  const visibleTaskIds = visibleTasks.map((task) => task.id)
-  const entries = await loadVisibleEntries(userId, visibleTaskIds)
-  const signedInUsersById = new Map(activeSessions.map((session) => [session.user.id, mapUser(session.user)]))
-  signedInUsersById.set(user.id, mapUser(user))
+  const [entries, sharedTaskEffort] = await Promise.all([
+    loadOwnedEntries(userId),
+    loadSharedTaskEffort(userId)
+  ])
+  const signedInUsersById = new Map(activeSessions.map((session) => [session.user.id, mapCollaborator(session.user)]))
+  signedInUsersById.set(user.id, mapCollaborator(user))
 
   return {
     user: mapUser(user),
-    users: users.map(mapUser),
+    users: users.map(mapCollaborator),
     signedInUsers: [...signedInUsersById.values()],
     taskInvitations: invitations.map(mapInvitation),
     categories: categories.map((category) => ({ id: category.id, ownerId: category.ownerId, name: category.name })),
@@ -372,6 +451,8 @@ export async function publicState(userId = 'u1', team = 'All') {
     blockers: blockers.map((blocker) => blocker.name),
     tasks: visibleTasks.map(mapTask),
     entries: entries.map(mapEntry),
+    sharedTaskEffort,
+    breezyNudges: breezyNudges.map(mapBreezyNudge),
     settings: settings
       ? {
           idleThresholdMinutes: settings.idleThresholdMinutes,
@@ -383,37 +464,51 @@ export async function publicState(userId = 'u1', team = 'All') {
           locationLabels: settings.locationLabels
         }
       : defaultSettings,
-    dashboards: await buildDashboards(userId, team),
+    dashboards: await buildDashboards(userId),
     journey: await buildJourney(userId),
     medals: await buildMedals(userId)
   }
 }
 
-export async function buildDashboards(userId: string, team = 'All') {
-  const [ownEntries, companyEntries, activeTrackers] = await Promise.all([
+async function loadRecentBreezyNudges(userId: string) {
+  return prisma.$queryRaw<Array<{
+    id: string
+    relatedEntryId: string
+    type: string
+    message: string
+    shownAt: Date
+    acknowledgedAt: Date | null
+  }>>(Prisma.sql`
+    SELECT
+      id,
+      related_entry_id AS "relatedEntryId",
+      type,
+      message,
+      shown_at AS "shownAt",
+      acknowledged_at AS "acknowledgedAt"
+    FROM breezy_nudges
+    WHERE user_id = ${userId}
+      AND related_entry_id IS NOT NULL
+    ORDER BY (acknowledged_at IS NULL) DESC, shown_at DESC
+    LIMIT 20
+  `)
+}
+
+export async function buildDashboards(userId: string) {
+  const [ownEntries] = await Promise.all([
     prisma.timeEntry.findMany({
       where: { userId, endedAt: { not: null } },
       include: { feedback: true, blockers: { include: { blocker: true } }, task: { include: { category: true } } },
       orderBy: { startedAt: 'desc' }
-    }),
-    prisma.timeEntry.findMany({
-      where: {
-        endedAt: { not: null },
-        ...(team === 'All' ? {} : { user: { team } })
-      },
-      include: { feedback: true, blockers: { include: { blocker: true } }, task: { include: { category: true } }, user: true },
-      orderBy: { startedAt: 'desc' }
-    }),
-    prisma.trackingPresence.findMany({
-      where: { task: { isShared: true } },
-      include: { user: true, task: true },
-      orderBy: { startedAt: 'desc' }
     })
   ])
 
+  const ownTotalSeconds = ownEntries.reduce((sum, entry) => sum + entry.durationSeconds, 0)
+
   return {
     personal: {
-      totalHours: roundHours(ownEntries.reduce((sum, entry) => sum + entry.durationSeconds, 0)),
+      totalHours: roundHours(ownTotalSeconds),
+      totalSeconds: ownTotalSeconds,
       byCategory: rollupBy(ownEntries, (entry) => entry.task.category.name),
       byTask: rollupBy(ownEntries, (entry) => entry.task.title),
       blockers: blockerRollup(ownEntries),
@@ -421,22 +516,91 @@ export async function buildDashboards(userId: string, team = 'All') {
       efficiency: countBy(ownEntries, (entry) => entry.feedback?.efficiencyFeel || 'Skipped'),
       energy: countBy(ownEntries, (entry) => entry.feedback?.energy || 'Skipped'),
       trend: weeklyTrend(ownEntries),
-      estimateVariance: estimateVariance(ownEntries)
+      weeks: buildPersonalWeeks(ownEntries)
+    }
+  }
+}
+
+export const companyDashboardMetrics = ['trackedTime', 'sessions', 'contextSwitches'] as const
+export const companyDashboardGroupings = ['category', 'flow', 'efficiency'] as const
+export type CompanyDashboardMetric = typeof companyDashboardMetrics[number]
+export type CompanyDashboardGrouping = typeof companyDashboardGroupings[number]
+
+export interface CompanyDashboardInput {
+  categoryId?: string
+  weekStart?: Date
+  metric: CompanyDashboardMetric
+  groupBy: CompanyDashboardGrouping
+}
+
+type CompanyDashboardEntry = PersonalWeekEntry & { contextSwitches: number }
+
+export async function buildCompanyDashboard(input: CompanyDashboardInput) {
+  const categories = await prisma.category.findMany({
+    orderBy: { name: 'asc' },
+    select: { id: true, name: true }
+  })
+  const categoryId = input.categoryId || null
+  if (categoryId && !categories.some(category => category.id === categoryId)) {
+    throw createError({ statusCode: 400, statusMessage: 'Select an available category.' })
+  }
+
+  const scope = categoryId ? { task: { categoryId } } : {}
+  const latest = input.weekStart
+    ? null
+    : await prisma.timeEntry.findFirst({
+        where: { endedAt: { not: null }, ...scope },
+        orderBy: { startedAt: 'desc' },
+        select: { startedAt: true }
+      })
+  const currentWeekStart = startOfUtcWeek(new Date())
+  const requestedStart = input.weekStart || startOfUtcWeek(latest?.startedAt || new Date())
+  const start = requestedStart > currentWeekStart ? currentWeekStart : requestedStart
+  const end = new Date(start)
+  end.setUTCDate(end.getUTCDate() + 7)
+  const visibleEnd = new Date(start)
+  visibleEnd.setUTCDate(visibleEnd.getUTCDate() + 6)
+
+  const [entries, activeSharedSessionCount] = await Promise.all([
+    prisma.timeEntry.findMany({
+      where: {
+        endedAt: { not: null },
+        startedAt: { gte: start, lt: end },
+        ...scope
+      },
+      include: {
+        feedback: true,
+        blockers: { include: { blocker: true } },
+        task: { include: { category: true } }
+      },
+      orderBy: { startedAt: 'asc' }
+    }),
+    prisma.trackingPresence.count({
+      where: {
+        task: { isShared: true, ...(categoryId ? { categoryId } : {}) }
+      }
+    })
+  ])
+  const companyEntries = entries as CompanyDashboardEntry[]
+
+  return {
+    categoryId,
+    availableCategories: categories,
+    week: {
+      start: displayDate(start),
+      end: displayDate(visibleEnd),
+      label: personalWeekLabel(start, visibleEnd)
     },
-    company: {
-      totalHours: roundHours(companyEntries.reduce((sum, entry) => sum + entry.durationSeconds, 0)),
-      byCategory: rollupBy(companyEntries, (entry) => entry.task.category.name),
-      blockers: blockerRollup(companyEntries),
-      flow: countBy(companyEntries, (entry) => entry.feedback?.flowQuality || 'Skipped'),
-      efficiency: countBy(companyEntries, (entry) => entry.feedback?.efficiencyFeel || 'Skipped'),
-      contextSwitchTrend: weeklyTrend(companyEntries, (entry) => entry.contextSwitches),
-      team
+    totalSeconds: companyEntries.reduce((sum, entry) => sum + entry.durationSeconds, 0),
+    activeSharedSessionCount,
+    overview: {
+      metric: input.metric,
+      groupBy: input.groupBy,
+      days: buildCompanyOverviewDays(companyEntries, start, input.metric, input.groupBy)
     },
-    activeTrackers: activeTrackers.map((presence) => ({
-      taskId: presence.taskId,
-      userId: presence.userId,
-      displayName: presence.user.displayName
-    }))
+    blockers: blockerRollup(companyEntries, 5),
+    flow: recordedCountBy(companyEntries, entry => entry.feedback?.flowQuality),
+    efficiency: recordedCountBy(companyEntries, entry => entry.feedback?.efficiencyFeel)
   }
 }
 
@@ -454,6 +618,9 @@ export async function createTask(input: TaskInput) {
     select: { id: true }
   })
   const invitedUserIds = validInvitees.map((user) => user.id)
+  if (input.requireInvitees && invitedUserIds.length === 0) {
+    throw createError({ statusCode: 400, statusMessage: 'Choose at least one existing teammate.' })
+  }
 
   return prisma.$transaction(async (tx) => {
     const task = await tx.task.create({
@@ -463,7 +630,6 @@ export async function createTask(input: TaskInput) {
         categoryId,
         clientId,
         projectId,
-        estimateMinutes: Number(input.estimateMinutes || 0) || null,
         ownerId,
         isShared: invitedUserIds.length > 0,
         members: {
@@ -547,7 +713,8 @@ export async function acceptTaskInvitation(input: { invitationId: string, userId
   const invitation = await prisma.taskInvite.findFirst({
     where: {
       id: input.invitationId,
-      recipientId: input.userId
+      recipientId: input.userId,
+      status: 'pending'
     },
     include: { task: { include: { members: true } } }
   })
@@ -577,7 +744,7 @@ export async function acceptTaskInvitation(input: { invitationId: string, userId
   return prisma.task.findUniqueOrThrow({ where: { id: invitation.taskId }, include: { members: true } }).then(mapTask)
 }
 
-export async function startEntry(input: { taskId: string, userId: string }) {
+export async function startEntry(input: StartEntryInput) {
   const task = await prisma.task.findUnique({
     where: { id: input.taskId },
     include: { members: true }
@@ -590,70 +757,86 @@ export async function startEntry(input: { taskId: string, userId: string }) {
   const active = await prisma.timeEntry.findFirst({ where: { userId: input.userId, endedAt: null } })
   if (active) throw createError({ statusCode: 409, statusMessage: 'Stop the current timer first.' })
 
+  const locationLabel = await resolveNewLocationLabel(input.userId, input.locationLabel)
+
   const startedAt = new Date()
-  return prisma.$transaction(async (tx) => {
-    const entry = await tx.timeEntry.create({
-      data: {
-        taskId: input.taskId,
-        userId: input.userId,
-        startedAt,
-        durationSeconds: 0,
-        isManual: false,
-        idleSeconds: 0,
-        contextSwitches: 0,
-        locationLabel: 'Home office'
-      },
-      include: { pauses: true, feedback: true, blockers: { include: { blocker: true } } }
+  try {
+    return await prisma.$transaction(async (tx) => {
+      const entry = await tx.timeEntry.create({
+        data: {
+          taskId: input.taskId,
+          userId: input.userId,
+          startedAt,
+          durationSeconds: 0,
+          isManual: false,
+          idleSeconds: 0,
+          excludedIdleSeconds: 0,
+          contextSwitches: 0,
+          locationLabel
+        },
+        include: { pauses: true, feedback: true, blockers: { include: { blocker: true } } }
+      })
+      await tx.trackingPresence.upsert({
+        where: { userId: input.userId },
+        update: { taskId: input.taskId, entryId: entry.id, startedAt },
+        create: { userId: input.userId, taskId: input.taskId, entryId: entry.id, startedAt }
+      })
+      return mapEntry(entry)
     })
-    await tx.trackingPresence.upsert({
-      where: { userId: input.userId },
-      update: { taskId: input.taskId, entryId: entry.id, startedAt },
-      create: { userId: input.userId, taskId: input.taskId, entryId: entry.id, startedAt }
-    })
-    return mapEntry(entry)
-  })
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+      throw createError({ statusCode: 409, statusMessage: 'Stop the current timer first.' })
+    }
+    throw error
+  }
 }
 
 export async function stopEntry(input: {
   entryId: string
   userId: string
-  idleSeconds: number
-  contextSwitches: number
-  pauses: PauseWindow[]
   feedback?: EntryFeedbackInput
   blockers: string[]
 }) {
-  const entry = await prisma.timeEntry.findFirst({
-    where: { id: input.entryId, userId: input.userId, endedAt: null }
-  })
-  if (!entry) throw createError({ statusCode: 404, statusMessage: 'Entry not found.' })
-
-  const endedAt = new Date()
-  const pauses = sanitizePauses(input.pauses || [])
   const feedback = validateFeedback(input.feedback)
   const blockers = normalizeBlockers(input.blockers)
   const blockerIds = await blockerIdsForNames(blockers)
-  const durationSeconds = calculateDuration(entry.startedAt.toISOString(), endedAt.toISOString(), pauses, Math.max(0, Number(input.idleSeconds || 0)))
 
   const saved = await prisma.$transaction(async (tx) => {
-    await tx.entryPause.deleteMany({ where: { entryId: entry.id } })
-    await tx.entryFeedback.deleteMany({ where: { entryId: entry.id } })
-    await tx.entryBlocker.deleteMany({ where: { entryId: entry.id } })
+    await lockActiveEntry(tx, input.userId, input.entryId)
+    const entry = await tx.timeEntry.findUniqueOrThrow({
+      where: { id: input.entryId },
+      include: { pauses: true }
+    })
+    const endedAt = new Date()
+    const openPause = entry.pauses.find((pause) => pause.endedAt === null)
+    const pauses = entry.pauses.map((pause) => ({
+      startedAt: pause.startedAt.toISOString(),
+      endedAt: (pause.endedAt || endedAt).toISOString()
+    }))
+    const durationSeconds = calculateDuration(
+      entry.startedAt.toISOString(),
+      endedAt.toISOString(),
+      pauses,
+      entry.excludedIdleSeconds
+    )
+
+    if (openPause) {
+      await tx.entryPause.update({
+        where: { id: openPause.id },
+        data: {
+          endedAt,
+          durationSeconds: calculateDuration(openPause.startedAt.toISOString(), endedAt.toISOString())
+        }
+      })
+    }
+    await tx.entryFeedback.deleteMany({ where: { entryId: input.entryId } })
+    await tx.entryBlocker.deleteMany({ where: { entryId: input.entryId } })
 
     const updated = await tx.timeEntry.update({
-      where: { id: entry.id },
+      where: { id: input.entryId },
       data: {
         endedAt,
         durationSeconds,
-        idleSeconds: Math.max(0, Number(input.idleSeconds || 0)),
-        contextSwitches: Math.max(0, Number(input.contextSwitches || 0)),
-        pauses: {
-          create: pauses.map((pause) => ({
-            startedAt: new Date(pause.startedAt),
-            endedAt: new Date(pause.endedAt),
-            durationSeconds: calculateDuration(pause.startedAt, pause.endedAt)
-          }))
-        },
         feedback: feedback ? { create: feedback } : undefined,
         blockers: {
           create: blockerIds.map((blockerId) => ({ blockerId }))
@@ -663,10 +846,11 @@ export async function stopEntry(input: {
     })
 
     await tx.trackingPresence.deleteMany({ where: { userId: input.userId } })
+    await enqueueDerivedRefresh(tx, input.userId)
     return updated
   })
 
-  await refreshDerivedRecords(input.userId)
+  await processDerivedRefresh(input.userId)
   return mapEntry(saved)
 }
 
@@ -697,38 +881,207 @@ export async function createManualEntry(input: TimeEntryInput) {
   const feedback = validateFeedback(input.feedback)
   const blockers = normalizeBlockers(input.blockers?.length ? input.blockers : ['None'])
   const blockerIds = await blockerIdsForNames(blockers)
-  const durationSeconds = calculateDuration(startedAt.toISOString(), endedAt.toISOString(), [], Math.max(0, Number(input.idleSeconds || 0)))
+  const idleSeconds = Math.max(0, Number(input.idleSeconds || 0))
+  const durationSeconds = calculateDuration(startedAt.toISOString(), endedAt.toISOString(), [], idleSeconds)
+  const locationLabel = await resolveNewLocationLabel(userId, input.locationLabel)
 
-  const entry = await prisma.timeEntry.create({
-    data: {
-      taskId: task.id,
-      userId,
-      startedAt,
-      endedAt,
-      durationSeconds,
-      isManual: true,
-      idleSeconds: Math.max(0, Number(input.idleSeconds || 0)),
-      contextSwitches: Math.max(0, Number(input.contextSwitches || 0)),
-      locationLabel: input.locationLabel || 'Manual',
-      feedback: feedback ? { create: feedback } : undefined,
-      blockers: { create: blockerIds.map((blockerId) => ({ blockerId })) },
-      auditEvents: {
-        create: {
-          userId,
-          eventType: 'manual_created',
-          changes: {
-            startedAt: startedAt.toISOString(),
-            endedAt: endedAt.toISOString(),
-            taskId: task.id
+  const entry = await prisma.$transaction(async (tx) => {
+    const saved = await tx.timeEntry.create({
+      data: {
+        taskId: task.id,
+        userId,
+        startedAt,
+        endedAt,
+        durationSeconds,
+        isManual: true,
+        idleSeconds,
+        excludedIdleSeconds: idleSeconds,
+        contextSwitches: Math.max(0, Number(input.contextSwitches || 0)),
+        locationLabel,
+        feedback: feedback ? { create: feedback } : undefined,
+        blockers: { create: blockerIds.map((blockerId) => ({ blockerId })) },
+        auditEvents: {
+          create: {
+            userId,
+            eventType: 'manual_created',
+            changes: {
+              startedAt: startedAt.toISOString(),
+              endedAt: endedAt.toISOString(),
+              taskId: task.id
+            }
           }
         }
-      }
-    },
-    include: { pauses: true, feedback: true, blockers: { include: { blocker: true } } }
+      },
+      include: { pauses: true, feedback: true, blockers: { include: { blocker: true } } }
+    })
+    await enqueueDerivedRefresh(tx, userId)
+    return saved
   })
 
-  await refreshDerivedRecords(userId)
+  await processDerivedRefresh(userId)
   return mapEntry(entry)
+}
+
+export async function updateEntry(userId: string, entryId: string, input: TimeEntryInput) {
+  const existing = await prisma.timeEntry.findFirst({
+    where: { id: entryId, userId, endedAt: { not: null } },
+    include: { pauses: true, idleDecisions: true, feedback: true, blockers: { include: { blocker: true } } }
+  })
+  if (!existing || !existing.endedAt) throw createError({ statusCode: 404, statusMessage: 'Entry not found.' })
+
+  const taskId = input.taskId || existing.taskId
+  const task = await prisma.task.findUnique({ where: { id: taskId }, include: { members: true } })
+  if (!task) throw createError({ statusCode: 404, statusMessage: 'Task not found.' })
+  if (!canTrackTask(mapTask(task), userId)) throw createError({ statusCode: 403, statusMessage: 'You cannot move this entry to that task.' })
+
+  const startedAt = normaliseDateInput(input.startedAt) || existing.startedAt
+  const endedAt = normaliseDateInput(input.endedAt) || existing.endedAt
+  if (endedAt <= startedAt) throw createError({ statusCode: 400, statusMessage: 'Entry end must be after start.' })
+
+  const overlap = await prisma.timeEntry.findFirst({
+    where: {
+      userId,
+      id: { not: entryId },
+      OR: [
+        { endedAt: null },
+        { startedAt: { lt: endedAt }, endedAt: { gt: startedAt } }
+      ]
+    }
+  })
+  if (overlap) throw createError({ statusCode: 409, statusMessage: 'Edited entry overlaps existing tracked time.' })
+
+  const idleSeconds = existing.idleSeconds
+  const excludedIdleSeconds = existing.excludedIdleSeconds
+  const contextSwitches = existing.contextSwitches
+  if (existing.pauses.some((pause) => pause.endedAt === null)) {
+    throw createError({ statusCode: 409, statusMessage: 'Completed entry has an open pause.' })
+  }
+  const editablePauses = pauseWindows('pauses', input.pauses || existing.pauses.map((pause) => ({
+    startedAt: pause.startedAt.toISOString(),
+    endedAt: pause.endedAt!.toISOString()
+  })), startedAt, endedAt)
+  if (existing.idleDecisions.some((decision) => decision.startedAt < startedAt || decision.endedAt > endedAt)) {
+    throw createError({ statusCode: 400, statusMessage: 'Edited time must keep saved idle decisions inside the entry.' })
+  }
+  const breakPauses = existing.idleDecisions
+    .filter((decision) => decision.decision === 'break')
+    .map((decision) => ({
+      startedAt: decision.startedAt.toISOString(),
+      endedAt: decision.endedAt.toISOString()
+    }))
+  const isSavedBreak = (pause: ClosedPauseWindow) => breakPauses.some((saved) => (
+    saved.startedAt === pause.startedAt && saved.endedAt === pause.endedAt
+  ))
+  const overlapsSavedIdle = (pause: ClosedPauseWindow) => existing.idleDecisions.some((decision) => (
+    new Date(pause.startedAt) < decision.endedAt && new Date(pause.endedAt) > decision.startedAt
+  ))
+  if (editablePauses.some((pause) => !isSavedBreak(pause) && overlapsSavedIdle(pause))) {
+    throw createError({ statusCode: 400, statusMessage: 'Editable pauses cannot overlap saved idle decisions.' })
+  }
+  const pauses = pauseWindows('pauses', [
+    ...editablePauses.filter((pause) => !isSavedBreak(pause)),
+    ...breakPauses
+  ], startedAt, endedAt)
+  const feedback = validateFeedback(input.feedback || (existing.feedback ? {
+    flowQuality: existing.feedback.flowQuality as FlowQuality,
+    efficiencyFeel: existing.feedback.efficiencyFeel as EfficiencyFeel,
+    energy: existing.feedback.energy as EnergyLevel,
+    note: existing.feedback.note || ''
+  } : undefined))
+  const blockers = normalizeBlockers(input.blockers || existing.blockers.map((row) => row.blocker.name))
+  const blockerIds = await blockerIdsForNames(blockers)
+  let locationLabel = existing.locationLabel
+  if (input.locationLabel !== undefined) {
+    const requestedLocation = String(input.locationLabel || '').trim()
+    if (!requestedLocation) {
+      locationLabel = null
+    } else if (requestedLocation !== existing.locationLabel) {
+      locationLabel = await resolveNewLocationLabel(userId, requestedLocation)
+      if (!locationLabel) {
+        throw createError({ statusCode: 400, statusMessage: 'Enable location tracking before changing the location label.' })
+      }
+    }
+  }
+  const durationSeconds = calculateDuration(
+    startedAt.toISOString(),
+    endedAt.toISOString(),
+    pauses,
+    excludedIdleSeconds
+  )
+  const before = auditEntrySnapshot(existing)
+
+  const updated = await prisma.$transaction(async (tx) => {
+    await tx.entryPause.deleteMany({ where: { entryId } })
+    await tx.entryFeedback.deleteMany({ where: { entryId } })
+    await tx.entryBlocker.deleteMany({ where: { entryId } })
+
+    const saved = await tx.timeEntry.update({
+      where: { id: entryId },
+      data: {
+        taskId,
+        startedAt,
+        endedAt,
+        durationSeconds,
+        idleSeconds,
+        excludedIdleSeconds,
+        contextSwitches,
+        locationLabel,
+        isEdited: true,
+        pauses: {
+          create: pauses.map((pause) => ({
+            startedAt: new Date(pause.startedAt),
+            endedAt: new Date(pause.endedAt),
+            durationSeconds: calculateDuration(pause.startedAt, pause.endedAt)
+          }))
+        },
+        feedback: feedback ? { create: feedback } : undefined,
+        blockers: { create: blockerIds.map((blockerId) => ({ blockerId })) }
+      },
+      include: { pauses: true, feedback: true, blockers: { include: { blocker: true } } }
+    })
+
+    await tx.entryAuditEvent.create({
+      data: {
+        entryId,
+        userId,
+        eventType: 'entry_edited',
+        changes: { before, after: auditEntrySnapshot(saved) }
+      }
+    })
+    await enqueueDerivedRefresh(tx, userId)
+    return saved
+  })
+
+  await processDerivedRefresh(userId)
+  return mapEntry(updated)
+}
+
+function auditEntrySnapshot(entry: {
+  taskId: string
+  startedAt: Date
+  endedAt: Date | null
+  durationSeconds: number
+  idleSeconds: number
+  excludedIdleSeconds: number
+  contextSwitches: number
+  locationLabel: string | null
+  pauses: Array<{ startedAt: Date, endedAt: Date | null }>
+  feedback: { flowQuality: string, efficiencyFeel: string, energy: string, note: string | null } | null
+  blockers: Array<{ blocker: { name: string } }>
+}) {
+  return {
+    taskId: entry.taskId,
+    startedAt: entry.startedAt.toISOString(),
+    endedAt: entry.endedAt?.toISOString() || null,
+    durationSeconds: entry.durationSeconds,
+    idleSeconds: entry.idleSeconds,
+    excludedIdleSeconds: entry.excludedIdleSeconds,
+    contextSwitches: entry.contextSwitches,
+    locationLabel: entry.locationLabel,
+    pauses: entry.pauses.map((pause) => ({ startedAt: pause.startedAt.toISOString(), endedAt: pause.endedAt?.toISOString() || null })),
+    feedback: entry.feedback,
+    blockers: entry.blockers.map((row) => row.blocker.name)
+  }
 }
 
 export async function updateProfile(userId: string, input: { displayName?: string, team?: string }) {
@@ -748,6 +1101,21 @@ export async function updateSettings(userId: string, settings: Record<string, un
     where: { userId },
     update: coerceSettings(settings),
     create: { userId, ...defaultSettings, ...coerceSettings(settings) }
+  })
+}
+
+export async function updateAccountSettings(userId: string, input: AccountSettingsInput) {
+  const settings = { ...input.settings, ...SYSTEM_BREEZY_SETTINGS }
+  await prisma.$transaction(async (tx) => {
+    await tx.user.update({
+      where: { id: userId },
+      data: input.profile
+    })
+    await tx.settings.upsert({
+      where: { userId },
+      update: settings,
+      create: { userId, ...settings }
+    })
   })
 }
 
@@ -773,6 +1141,7 @@ export async function exportRows(userId: string) {
     ended_at: entry.endedAt?.toISOString() || '',
     duration_seconds: entry.durationSeconds,
     idle_seconds: entry.idleSeconds,
+    excluded_idle_seconds: entry.excludedIdleSeconds,
     context_switches: entry.contextSwitches,
     location_label: entry.locationLabel || '',
     manual: entry.isManual,
@@ -793,22 +1162,10 @@ export async function exportData(userId: string, format: 'csv' | 'json') {
   return format === 'csv' ? toCsv(rows) : JSON.stringify(rows, null, 2)
 }
 
-function sanitizePauses(pauses: PauseWindow[]) {
-  return pauses
-    .map((pause) => ({ startedAt: String(pause.startedAt || ''), endedAt: String(pause.endedAt || '') }))
-    .filter((pause) => {
-      const startedAt = new Date(pause.startedAt)
-      const endedAt = new Date(pause.endedAt)
-      return !Number.isNaN(startedAt.getTime()) && !Number.isNaN(endedAt.getTime()) && endedAt > startedAt
-    })
-}
-
 function coerceSettings(settings: Record<string, unknown>) {
   return {
     idleThresholdMinutes: Number(settings.idleThresholdMinutes || defaultSettings.idleThresholdMinutes),
-    nudgeCadenceMinutes: Number(settings.nudgeCadenceMinutes || defaultSettings.nudgeCadenceMinutes),
-    breezyVerbosity: String(settings.breezyVerbosity || defaultSettings.breezyVerbosity),
-    muted: Boolean(settings.muted),
+    ...SYSTEM_BREEZY_SETTINGS,
     locationEnabled: Boolean(settings.locationEnabled),
     activityEnabled: settings.activityEnabled === undefined ? defaultSettings.activityEnabled : Boolean(settings.activityEnabled),
     locationLabels: Array.isArray(settings.locationLabels) ? settings.locationLabels : defaultSettings.locationLabels
@@ -827,7 +1184,143 @@ function countBy<T>(entries: T[], label: (entry: T) => string) {
   return [...map.entries()].map(([name, count]) => ({ name, count }))
 }
 
-function blockerRollup(entries: Array<{ durationSeconds: number, blockers: { blocker: { name: string } }[] }>) {
+type PersonalWeekEntry = {
+  startedAt: Date
+  durationSeconds: number
+  task: { title: string, category: { name: string } }
+  feedback?: { flowQuality: string, efficiencyFeel: string, energy: string } | null
+  blockers: { blocker: { name: string } }[]
+}
+
+function startOfUtcWeek(value: Date) {
+  const date = new Date(Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate()))
+  const mondayOffset = (date.getUTCDay() + 6) % 7
+  date.setUTCDate(date.getUTCDate() - mondayOffset)
+  return date
+}
+
+function personalWeekLabel(start: Date, end: Date) {
+  const month = new Intl.DateTimeFormat('en', { month: 'short', timeZone: 'UTC' })
+  const sameYear = start.getUTCFullYear() === end.getUTCFullYear()
+  const sameMonth = sameYear && start.getUTCMonth() === end.getUTCMonth()
+  if (sameMonth) return `${month.format(start)} ${start.getUTCDate()}–${end.getUTCDate()}, ${end.getUTCFullYear()}`
+  if (sameYear) return `${month.format(start)} ${start.getUTCDate()}–${month.format(end)} ${end.getUTCDate()}, ${end.getUTCFullYear()}`
+  return `${month.format(start)} ${start.getUTCDate()}, ${start.getUTCFullYear()}–${month.format(end)} ${end.getUTCDate()}, ${end.getUTCFullYear()}`
+}
+
+function buildCompanyOverviewDays(
+  entries: CompanyDashboardEntry[],
+  start: Date,
+  metric: CompanyDashboardMetric,
+  groupBy: CompanyDashboardGrouping
+) {
+  return Array.from({ length: 7 }, (_, index) => {
+    const date = new Date(start)
+    date.setUTCDate(date.getUTCDate() + index)
+    const isoDate = displayDate(date)
+    const values = new Map<string, number>()
+    for (const entry of entries) {
+      if (displayDate(entry.startedAt) !== isoDate) continue
+      const name = companyGroupingName(entry, groupBy)
+      if (!name) continue
+      values.set(name, (values.get(name) || 0) + companyMetricValue(entry, metric))
+    }
+    return {
+      date: isoDate,
+      label: `${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][date.getUTCDay()]} ${date.getUTCDate()}`,
+      series: [...values.entries()]
+        .map(([name, value]) => ({ name, value }))
+        .sort((left, right) => right.value - left.value || left.name.localeCompare(right.name))
+    }
+  })
+}
+
+function companyGroupingName(entry: CompanyDashboardEntry, groupBy: CompanyDashboardGrouping) {
+  if (groupBy === 'category') return entry.task.category.name
+  if (groupBy === 'flow') {
+    return entry.feedback?.flowQuality && entry.feedback.flowQuality !== 'Skipped'
+      ? entry.feedback.flowQuality
+      : null
+  }
+  return entry.feedback?.efficiencyFeel && entry.feedback.efficiencyFeel !== 'Skipped'
+    ? entry.feedback.efficiencyFeel
+    : null
+}
+
+function companyMetricValue(entry: CompanyDashboardEntry, metric: CompanyDashboardMetric) {
+  if (metric === 'trackedTime') return entry.durationSeconds
+  if (metric === 'sessions') return 1
+  return entry.contextSwitches
+}
+
+function dailySeries<T extends PersonalWeekEntry>(entries: T[], label: (entry: T) => string) {
+  const buckets = new Map<string, { seconds: number, sessions: number }>()
+  for (const entry of entries) {
+    const name = label(entry)
+    const current = buckets.get(name) || { seconds: 0, sessions: 0 }
+    current.seconds += entry.durationSeconds
+    current.sessions += 1
+    buckets.set(name, current)
+  }
+  return [...buckets.entries()]
+    .map(([name, value]) => ({ name, ...value, hours: Math.round((value.seconds / 3600) * 100) / 100 }))
+    .sort((left, right) => right.seconds - left.seconds || left.name.localeCompare(right.name))
+}
+
+export function buildPersonalWeeks<T extends PersonalWeekEntry>(entries: T[]) {
+  const weekBuckets = new Map<string, T[]>()
+  for (const entry of entries) {
+    const weekStart = startOfUtcWeek(new Date(entry.startedAt)).toISOString().slice(0, 10)
+    const bucket = weekBuckets.get(weekStart) || []
+    bucket.push(entry)
+    weekBuckets.set(weekStart, bucket)
+  }
+
+  return [...weekBuckets.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([weekStart, weekEntries]) => {
+      const start = new Date(`${weekStart}T00:00:00.000Z`)
+      const end = new Date(start)
+      end.setUTCDate(end.getUTCDate() + 6)
+      const days = Array.from({ length: 7 }, (_, index) => {
+        const date = new Date(start)
+        date.setUTCDate(date.getUTCDate() + index)
+        const isoDate = date.toISOString().slice(0, 10)
+        const dayEntries = weekEntries.filter(entry => new Date(entry.startedAt).toISOString().slice(0, 10) === isoDate)
+        const recordedFlowEntries = dayEntries.filter(entry => entry.feedback?.flowQuality && entry.feedback.flowQuality !== 'Skipped')
+        return {
+          date: isoDate,
+          label: `${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][date.getUTCDay()]} ${date.getUTCDate()}`,
+          byCategory: dailySeries(dayEntries, entry => entry.task.category.name),
+          byTask: dailySeries(dayEntries, entry => entry.task.title),
+          byFlow: dailySeries(recordedFlowEntries, entry => entry.feedback!.flowQuality)
+        }
+      })
+
+      return {
+        weekStart,
+        weekEnd: end.toISOString().slice(0, 10),
+        label: personalWeekLabel(start, end),
+        totalSeconds: weekEntries.reduce((sum, entry) => sum + entry.durationSeconds, 0),
+        days,
+        blockers: blockerRollup(weekEntries, 4),
+        efficiency: recordedCountBy(weekEntries, entry => entry.feedback?.efficiencyFeel),
+        energy: recordedCountBy(weekEntries, entry => entry.feedback?.energy)
+      }
+    })
+}
+
+export function recordedCountBy<T>(entries: T[], label: (entry: T) => string | null | undefined) {
+  const map = new Map<string, number>()
+  for (const entry of entries) {
+    const value = label(entry)
+    if (!value || value === 'Skipped') continue
+    map.set(value, (map.get(value) || 0) + 1)
+  }
+  return [...map.entries()].map(([name, count]) => ({ name, count }))
+}
+
+export function blockerRollup(entries: Array<{ durationSeconds: number, blockers: { blocker: { name: string } }[] }>, limit = Number.POSITIVE_INFINITY) {
   const map = new Map<string, { count: number, seconds: number }>()
   for (const entry of entries) {
     for (const blocker of entry.blockers.map((item) => item.blocker.name).filter((item) => item !== 'None')) {
@@ -837,29 +1330,56 @@ function blockerRollup(entries: Array<{ durationSeconds: number, blockers: { blo
       map.set(blocker, current)
     }
   }
-  return [...map.entries()].map(([name, value]) => ({ name, count: value.count, hours: roundHours(value.seconds) })).sort((a, b) => b.hours - a.hours)
+  return [...map.entries()]
+    .sort(([leftName, left], [rightName, right]) => (
+      right.seconds - left.seconds
+      || right.count - left.count
+      || leftName.localeCompare(rightName)
+    ))
+    .slice(0, limit)
+    .map(([name, value]) => ({ name, count: value.count, hours: roundHours(value.seconds) }))
 }
 
-function weeklyTrend<T extends { startedAt: Date, durationSeconds: number }>(entries: T[], value: (entry: T) => number = (entry) => entry.durationSeconds / 3600) {
+export function weeklyTrend<T extends { startedAt: Date, durationSeconds: number }>(entries: T[], value: (entry: T) => number = (entry) => entry.durationSeconds / 3600) {
   const formatter = new Intl.DateTimeFormat('en', { month: 'short', day: 'numeric', timeZone: 'UTC' })
   const map = new Map<string, number>()
   for (const entry of entries) {
     const date = new Date(entry.startedAt)
     const day = date.getUTCDay()
     date.setUTCDate(date.getUTCDate() - day)
-    const label = formatter.format(date)
-    map.set(label, Math.round(((map.get(label) || 0) + value(entry)) * 10) / 10)
+    const weekStart = date.toISOString().slice(0, 10)
+    map.set(weekStart, Math.round(((map.get(weekStart) || 0) + value(entry)) * 10) / 10)
   }
-  return [...map.entries()].map(([name, value]) => ({ name, value })).slice(-8)
+  return [...map.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .slice(-8)
+    .map(([weekStart, amount]) => ({
+      name: formatter.format(new Date(`${weekStart}T00:00:00.000Z`)),
+      value: amount
+    }))
 }
 
-function estimateVariance(entries: Array<{ durationSeconds: number, task: { title: string, estimateMinutes: number | null } }>) {
-  return entries.map((entry) => ({
-    task: entry.task.title,
-    estimateMinutes: entry.task.estimateMinutes || 0,
-    actualMinutes: Math.round(entry.durationSeconds / 60),
-    varianceMinutes: entry.task.estimateMinutes ? Math.round(entry.durationSeconds / 60 - entry.task.estimateMinutes) : 0
-  })).slice(0, 5)
+export function weeklyAverageTrend<T extends { startedAt: Date }>(entries: T[], value: (entry: T) => number) {
+  const formatter = new Intl.DateTimeFormat('en', { month: 'short', day: 'numeric', timeZone: 'UTC' })
+  const buckets = new Map<string, { total: number, count: number }>()
+
+  for (const entry of entries) {
+    const date = new Date(entry.startedAt)
+    date.setUTCDate(date.getUTCDate() - date.getUTCDay())
+    const weekStart = date.toISOString().slice(0, 10)
+    const bucket = buckets.get(weekStart) || { total: 0, count: 0 }
+    bucket.total += value(entry)
+    bucket.count += 1
+    buckets.set(weekStart, bucket)
+  }
+
+  return [...buckets.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .slice(-8)
+    .map(([weekStart, bucket]) => ({
+      name: formatter.format(new Date(`${weekStart}T00:00:00.000Z`)),
+      value: Math.round((bucket.total / bucket.count) * 10) / 10
+    }))
 }
 
 async function taskForManualEntry(userId: string, taskId?: string) {
@@ -883,7 +1403,7 @@ async function buildJourney(userId: string) {
     prisma.breezyDay.findMany({ where: { userId }, orderBy: { date: 'asc' } }),
     prisma.timeEntry.findMany({
       where: { userId, endedAt: { not: null } },
-      include: { feedback: true, blockers: { include: { blocker: true } } },
+      include: { pauses: true, feedback: true, blockers: { include: { blocker: true } } },
       orderBy: { startedAt: 'asc' }
     })
   ])
@@ -914,6 +1434,7 @@ function deriveJourneyFromEntries(entries: Array<{
   contextSwitches: number
   feedback: { flowQuality: string, efficiencyFeel: string, energy: string } | null
   blockers: { blocker: { name: string } }[]
+  pauses: { durationSeconds: number | null }[]
 }>) {
   const byDate = new Map<string, typeof entries>()
   for (const entry of entries) {
@@ -928,6 +1449,7 @@ function deriveJourneyFromEntries(entries: Array<{
       energy: entry.feedback?.energy as EnergyLevel | undefined,
       blockers: entry.blockers.map((row) => row.blocker.name),
       idleSeconds: entry.idleSeconds,
+      breakSeconds: entry.pauses.reduce((sum, pause) => sum + (pause.durationSeconds || 0), 0),
       contextSwitches: entry.contextSwitches
     })))
     return {
@@ -951,51 +1473,4 @@ async function buildMedals(userId: string) {
     description: medal.description,
     awarded: awardedCodes.has(medal.code)
   }))
-}
-
-async function refreshDerivedRecords(userId: string) {
-  const entries = await prisma.timeEntry.findMany({
-    where: { userId, endedAt: { not: null } },
-    include: { feedback: true, blockers: { include: { blocker: true } } }
-  })
-  const byDate = new Map<string, typeof entries>()
-  for (const entry of entries) {
-    const key = displayDate(entry.startedAt)
-    byDate.set(key, [...(byDate.get(key) || []), entry])
-  }
-
-  for (const [date, dayEntries] of byDate.entries()) {
-    const derived = deriveBreezyDay(dayEntries.map((entry) => ({
-      durationSeconds: entry.durationSeconds,
-      flowQuality: entry.feedback?.flowQuality as FlowQuality | undefined,
-      efficiencyFeel: entry.feedback?.efficiencyFeel as EfficiencyFeel | undefined,
-      energy: entry.feedback?.energy as EnergyLevel | undefined,
-      blockers: entry.blockers.map((row) => row.blocker.name),
-      idleSeconds: entry.idleSeconds,
-      contextSwitches: entry.contextSwitches
-    })))
-    await prisma.breezyDay.upsert({
-      where: { userId_date: { userId, date: new Date(`${date}T00:00:00.000Z`) } },
-      update: { breezyMood: derived.mood, airClarityScore: derived.airClarityScore },
-      create: { userId, date: new Date(`${date}T00:00:00.000Z`), breezyMood: derived.mood, airClarityScore: derived.airClarityScore }
-    })
-  }
-
-  const awardedCodes = awardMedals(entries.map((entry) => ({
-    durationSeconds: entry.durationSeconds,
-    flowQuality: entry.feedback?.flowQuality as FlowQuality | undefined,
-    efficiencyFeel: entry.feedback?.efficiencyFeel as EfficiencyFeel | undefined,
-    energy: entry.feedback?.energy as EnergyLevel | undefined,
-    blockers: entry.blockers.map((row) => row.blocker.name),
-    idleSeconds: entry.idleSeconds,
-    contextSwitches: entry.contextSwitches
-  })))
-  const medals = await prisma.medal.findMany({ where: { code: { in: awardedCodes } } })
-  await prisma.$transaction([
-    prisma.userMedal.deleteMany({ where: { userId } }),
-    prisma.userMedal.createMany({
-      data: medals.map((medal) => ({ userId, medalId: medal.id })),
-      skipDuplicates: true
-    })
-  ])
 }

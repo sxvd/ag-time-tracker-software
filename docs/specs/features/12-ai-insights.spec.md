@@ -4,76 +4,61 @@ Source: extracted from the preserved full brief in `docs/spec.md`.
 
 ## Summary
 
-AI Insights is an optional suggestion panel. It can provide personal and company-level suggestions when a key is configured, and must degrade cleanly when no key exists.
+AI Insights is deferred. It is not part of the current Personal Dashboard, Company Dashboard, backend API, runtime configuration, or production workflow.
 
 ## Users
 
-- Individuals looking for a personal improvement suggestion.
-- Company viewers looking for an aggregated process suggestion.
+- None in the current product scope.
 
 ## Scope
 
-- Personal insight suggestion.
-- Company insight suggestion.
-- Optional free LLM API integration.
-- Graceful no-key fallback.
-- Preserve company privacy boundaries.
+- Record the deferral explicitly so AI suggestions are not accidentally restored during dashboard work.
 
 ## Out Of Scope
 
 - AI as a required dependency for core workflows.
+- Personal and company AI suggestion panels.
+- AI insight API routes and provider integration.
+- AI-specific runtime environment variables.
 - AI-generated performance ranking.
 - Sending sensitive raw personal data unnecessarily.
 
 ## UI Reference
 
-The original `docs/spec.md` does not include a dedicated AI Insights ASCII mockup. It is specified as an optional panel/route and appears in the demo script.
+The Personal Dashboard ASCII mockup in `docs/spec.md` intentionally excludes AI suggestions.
 
 ## Functional Requirements
 
-- The route works when no API key is configured.
-- No-key fallback returns useful deterministic suggestions from dashboard data.
-- Personal suggestions use personal dashboard patterns.
-- Company suggestions use aggregated process data.
-- If an LLM provider is added later, the UI contract should remain stable.
+- Personal and company dashboards do not render an AI suggestion panel or button.
+- The current product does not expose an AI insights API route.
+- The runtime does not require or advertise an AI provider key.
+- Removing AI suggestions must not change dashboard privacy, tracking, export, Breezy, or medal behavior.
 
 ## Data And API
 
-Relevant target data:
-
-- Dashboard rollups from personal and company dashboards.
-- Runtime config key such as `NUXT_AI_INSIGHTS_API_KEY`.
-
-Relevant current files:
-
-- `backend/api/insights.post.ts`
-- `backend/utils/store.ts`
-- `nuxt.config.ts`
-- `frontend/app.vue`
+- There is no current AI-specific database model or API route.
+- Dashboard rollups remain available through the authenticated bootstrap API for non-AI dashboard features.
+- No AI provider key is exposed through Nuxt runtime configuration or deployment environments.
 
 ## Current Implementation
 
-- `insights.post.ts` requires a session and reads dashboard rollups.
-- If no API key is configured, it returns deterministic personal or company suggestions.
-- If an API key is present, it returns a placeholder response indicating where provider integration can be swapped in.
-- `frontend/app.vue` has buttons for personal and company insights.
+- Personal and company dashboards contain no AI suggestion panel or request controls.
+- The former insights API route and frontend panel have been removed.
+- App orchestration, Nuxt runtime configuration, Docker Compose, deployment setup, and environment documentation do not contain an AI insight dependency.
 
 ## Gaps
 
-- There is no real LLM provider call.
-- There are no tests for no-key fallback.
-- Prompt/data minimization rules are not yet specified for a future provider integration.
-- Company suggestions depend on PostgreSQL-backed aggregate data.
+- AI remains intentionally deferred. Restoring it requires a separately approved product and privacy design.
 
 ## Acceptance Criteria
 
-- Personal and company insight buttons return suggestions with no key configured.
-- No-key response is clearly graceful, not an error.
-- Company insight remains aggregate and process-focused.
-- Adding a provider later does not require changing the UI contract.
+- No AI suggestion panel or button appears on either dashboard.
+- No current production request can call an AI insights endpoint.
+- No AI provider key is required in current environment configuration.
+- Dashboard, export, and privacy tests continue to pass after removal.
 
 ## Tests And Verification
 
-- API tests for no-key personal and company fallbacks.
-- API tests for auth requirement.
-- Browser check: run one personal and one company insight with no key configured.
+- Component contracts assert that both dashboards omit AI suggestion controls.
+- Production configuration tests assert that no AI provider key is required.
+- Browser check confirms both dashboards work without AI panels or failed AI requests.

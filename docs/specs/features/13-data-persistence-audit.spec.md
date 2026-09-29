@@ -18,7 +18,7 @@ This cross-cutting spec defines the production persistence target. All core work
 - Checked-in migrations.
 - Auth/session persistence.
 - Foreign keys, unique constraints, cascade rules where appropriate, and useful indexes.
-- Seed/demo data across users, teams, categories, feedback, blockers, sessions, collaborators, Breezy Journey, and exports.
+- Seed/demo data across users, task categories, feedback, blockers, sessions, collaborators, Breezy Journey, and exports. Account-level team values remain legacy compatibility data until their column is removed.
 - Audit history for manual creation and edits.
 - No billable/rate/earnings columns.
 
@@ -83,14 +83,15 @@ Additional required models/fields:
 - `.env.example` includes `DATABASE_URL`, session password, and AI key.
 - `backend/utils/prisma.ts` provides the Prisma client singleton for Nitro runtime routes.
 - Runtime API routes read and mutate PostgreSQL through Prisma-backed services in `backend/utils/store.ts`.
-- `backend/prisma/seed.mjs` provides database seed/demo data.
+- `backend/prisma/seed.mjs` provides database seed/demo data and uses the same shared Breezy/medal derivation implementation as runtime refresh.
+- All seven checked-in migrations apply to the disposable PostgreSQL integration database, and the database-backed suite covers 44 permission, timer, idle, context-switch, settings, edit, seed/auth, privacy, concurrency, and persistence checks.
+- Migration `0008_remove_task_estimates` removes the deferred task-estimate field from the production schema.
+- A live `/tracker/` browser verification against PostgreSQL now covers start, persisted pause/refresh/resume, a persisted split-as-break idle decision, feedback-before-stop ordering, and the final entry/feedback/blocker rows. Context persistence/restore was API-assisted with the exact authenticated count-only request because the controlled Browser did not emit a native `visibilitychange`; native background-tab behavior remains unverified in that run.
 
 ## Gaps
 
-- A clean local PostgreSQL migration apply was not verified in this workspace.
-- API integration tests backed by a test PostgreSQL database are still needed.
-- Browser verification against a live PostgreSQL database is still needed.
-- Full edit-entry UI/API behavior remains incomplete outside the persistence layer.
+- Completed-entry UI/API editing is implemented, including audit rows and retryable derived refresh. Idle/context totals, idle decisions, and split-as-break pause windows intentionally remain server-authoritative rather than editable fields.
+- Full client/project/category management and a stable calendar-week Journey aggregate remain deferred product gaps, not persistence blockers for the implemented core flows.
 
 ## Acceptance Criteria
 
@@ -106,3 +107,4 @@ Additional required models/fields:
 - Migration apply against a clean PostgreSQL database.
 - API integration tests backed by a test database.
 - Export/dashboard verification against seeded persisted rows.
+- PostgreSQL regression coverage includes consent-aware location/export, owner-only detailed DTOs, reduced collaborative summaries, idle idempotency/overlap, serialized timer transitions, and actual-break Breezy/medal semantics.
