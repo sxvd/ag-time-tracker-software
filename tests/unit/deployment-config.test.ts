@@ -94,48 +94,16 @@ describe('production deployment configuration', () => {
     expect(deployScript).not.toMatch(/GOOGLE_OIDC|auth\/google|PASSWORD_AUTH_ENABLED/)
     expect(deployScript).toContain('Configuring DATABASE_URL for Compose PostgreSQL')
     expect(deployScript).toContain('git pull --ff-only')
-    expect(deployScript).toContain('--expected-sha')
     expect(deployScript).toContain('--no-pull')
-    expect(deployScript).toContain('verify_candidate')
+    expect(deployScript).not.toContain('--expected-sha')
+    expect(deployScript).not.toContain('EXPECTED_SHA')
+    expect(deployScript).toContain('DEPLOY_TAG')
+    expect(deployScript).toContain('%Y%m%dT%H%M%SZ')
     expect(deployScript).toContain('No changes found and no new tags. Exiting')
     expect(deployScript).toContain('docker compose -f docker-compose.prod.yml --env-file .env.production build web')
     expect(deployScript).toContain('docker compose -f docker-compose.prod.yml --env-file .env.production up -d web')
     expect(migrationIndex).toBeGreaterThan(-1)
     expect(webStartIndex).toBeGreaterThan(migrationIndex)
-  })
-
-  it('stops before environment or build work when HEAD differs from the reviewed SHA', () => {
-    const appDir = mkdtempSync(join(tmpdir(), 'tracker-deploy-candidate-'))
-    try {
-      const actualSha = '1111111111111111111111111111111111111111'
-      const expectedSha = '0000000000000000000000000000000000000000'
-      const binDir = join(appDir, 'bin')
-      mkdirSync(binDir)
-      const fakeGit = join(binDir, 'git')
-      writeFileSync(fakeGit, `#!/bin/sh\n[ "$1 $2" = "rev-parse HEAD" ] && printf '%s\\n' '${actualSha}'\n`)
-      chmodSync(fakeGit, 0o755)
-
-      const result = spawnSync('bash', [
-        resolve(rootDir, 'deploy.sh'),
-        '--force',
-        '--no-pull',
-        '--expected-sha',
-        expectedSha
-      ], {
-        cwd: rootDir,
-        env: { ...process.env, APP_DIR: appDir, PATH: `${binDir}:${process.env.PATH || ''}` },
-        encoding: 'utf8'
-      })
-
-      expect(result.status).not.toBe(0)
-      expect(`${result.stdout}${result.stderr}`).toContain(
-        `Deployment candidate mismatch: expected ${expectedSha}, found ${actualSha}.`
-      )
-      expect(existsSync(join(appDir, '.env.production'))).toBe(false)
-      expect(existsSync(join(appDir, 'version.json'))).toBe(false)
-    } finally {
-      rmSync(appDir, { recursive: true, force: true })
-    }
   })
 
   it('requires a protected backup directory outside the Git checkout', () => {
@@ -226,7 +194,7 @@ describe('production deployment configuration', () => {
     }
   })
 
-  it('leaves the checkout clean after a successful immutable deployment procedure', () => {
+  it('leaves the checkout clean after a successful automated deployment procedure', () => {
     const sandboxDir = mkdtempSync(join(tmpdir(), 'tracker-deploy-clean-'))
     try {
       const repoDir = join(sandboxDir, 'app')
@@ -237,7 +205,7 @@ describe('production deployment configuration', () => {
       copyFileSync(resolve(rootDir, '.gitignore'), join(repoDir, '.gitignore'))
       chmodSync(join(repoDir, 'deploy.sh'), 0o755)
 
-      for (const command of ['npm', 'docker']) {
+      for (const command of ['docker']) {
         const executable = join(binDir, command)
         writeFileSync(executable, '#!/bin/sh\nexit 0\n')
         chmodSync(executable, 0o755)
@@ -248,11 +216,9 @@ describe('production deployment configuration', () => {
       run('git', ['config', 'user.name', 'Deployment Test'], { cwd: repoDir })
       run('git', ['add', '.'], { cwd: repoDir })
       run('git', ['commit', '--quiet', '-m', 'fixture'], { cwd: repoDir })
-      const candidateSha = run('git', ['rev-parse', 'HEAD'], { cwd: repoDir }).stdout.trim()
-
-      const result = run('bash', [join(repoDir, 'deploy.sh'), '--force', '--no-pull', '--expected-sha', candidateSha], {
+      const result = run('bash', [join(repoDir, 'deploy.sh'), '--force', '--no-pull'], {
         cwd: repoDir,
-        env: { ...process.env, APP_DIR: repoDir, PATH: `${binDir}:${process.env.PATH || ''}` }
+        env: { ...process.env, APP_DIR: repoDir, DEPLOY_TAG: 'test-release', PATH: `${binDir}:${process.env.PATH || ''}` }
       })
 
       expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0)
@@ -263,13 +229,11 @@ describe('production deployment configuration', () => {
     }
   })
 
-  it('documents only the mandatory reviewed-SHA deployment invocation', () => {
+  it('documents the automatic latest-main deployment invocation', () => {
     const readme = readProjectFile('README.md')
     const deployCommands = readme.match(/^\.\/deploy\.sh.*$/gm) || []
 
-    expect(deployCommands).toEqual([
-      './deploy.sh --force --no-pull --expected-sha "$CANDIDATE_SHA"'
-    ])
+    expect(deployCommands).toEqual(['./deploy.sh'])
     expect(readme).toContain('[mandatory production runbook](docs/operations/production-runbook.md)')
   })
 
@@ -294,6 +258,14 @@ describe('production deployment configuration', () => {
     expect(dockerfile).toContain('apt-get install -y --no-install-recommends')
     expect(dockerfile).toContain('ca-certificates')
     expect(dockerfile).toContain('openssl')
+  })
+
+  it('verifies production configuration inside the Docker build', () => {
+    const dockerfile = readProjectFile('Dockerfile')
+    const deployScript = readProjectFile('deploy.sh')
+
+    expect(dockerfile).toContain('RUN npm run verify:production')
+    expect(deployScript).not.toContain('npm run verify:production')
   })
 
   it('pins the root Vue runtime required by the production Nuxt server', () => {
