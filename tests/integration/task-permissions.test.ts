@@ -1,6 +1,6 @@
 import { createError } from 'h3'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { acceptTaskInvitation, publicState, shareTask } from '../../backend/utils/store'
+import { acceptTaskInvitation, createTask, publicState, shareTask } from '../../backend/utils/store'
 import {
   createEntryFixture,
   createTaskFixture,
@@ -31,7 +31,8 @@ describe('shared task permissions', () => {
     }))
     expect(pendingState.tasks).toContainEqual(expect.objectContaining({ id: fixtures.task.id }))
     expect(pendingState.entries).not.toContainEqual(expect.objectContaining({ taskId: fixtures.task.id }))
-    expect(memberState.entries).toContainEqual(expect.objectContaining({ taskId: fixtures.task.id }))
+    expect(memberState.entries).not.toContainEqual(expect.objectContaining({ taskId: fixtures.task.id }))
+    expect(memberState.sharedTaskEffort).toContainEqual(expect.objectContaining({ taskId: fixtures.task.id }))
     expect(unrelatedState.tasks).not.toContainEqual(expect.objectContaining({ id: fixtures.task.id }))
     expect(unrelatedState.entries).not.toContainEqual(expect.objectContaining({ taskId: fixtures.task.id }))
     expect(pendingState.users[0]).not.toHaveProperty('email')
@@ -45,6 +46,49 @@ describe('shared task permissions', () => {
       senderId: fixtures.member.id,
       recipientIds: [fixtures.unrelated.id]
     })).rejects.toMatchObject({ statusCode: 403 })
+  })
+
+  it('rejects collaboration-mode creation without a valid teammate', async () => {
+    const owner = await createUser({ id: 'team-owner', email: 'team-owner@airgradient.com', displayName: 'Team owner' })
+
+    await expect(createTask({
+      title: 'Team planning',
+      ownerId: owner.id,
+      members: [owner.id, 'missing-user'],
+      requireInvitees: true
+    })).rejects.toMatchObject({
+      statusCode: 400,
+      statusMessage: 'Choose at least one existing teammate.'
+    })
+  })
+
+  it('shows a newly created team task to its owner before the invite is accepted', async () => {
+    const owner = await createUser({ id: 'new-owner', email: 'new-owner@airgradient.com', displayName: 'New owner' })
+    const teammate = await createUser({ id: 'new-teammate', email: 'new-teammate@airgradient.com', displayName: 'New teammate' })
+
+    const task = await createTask({
+      title: 'Shared launch task',
+      ownerId: owner.id,
+      members: [owner.id, teammate.id],
+      requireInvitees: true
+    })
+    const ownerState = await publicState(owner.id)
+
+    expect(task).toMatchObject({ isShared: true, members: [owner.id] })
+    expect(ownerState.tasks).toContainEqual(expect.objectContaining({
+      id: task.id,
+      isShared: true,
+      members: [owner.id]
+    }))
+    expect(ownerState.sharedTaskEffort).toContainEqual(expect.objectContaining({
+      taskId: task.id,
+      myDurationSeconds: 0
+    }))
+    expect(ownerState.taskInvitations).toContainEqual(expect.objectContaining({
+      taskId: task.id,
+      recipientId: teammate.id,
+      status: 'pending'
+    }))
   })
 
   it('does not accept an invitation after it leaves pending status', async () => {

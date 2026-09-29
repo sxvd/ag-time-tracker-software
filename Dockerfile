@@ -20,6 +20,9 @@ EXPOSE 3000
 CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0"]
 
 FROM deps AS test
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends git \
+  && rm -rf /var/lib/apt/lists/*
 COPY . .
 RUN npx prisma generate --schema=backend/prisma/schema.prisma
 RUN npx nuxt prepare

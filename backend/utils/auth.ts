@@ -24,6 +24,16 @@ export function validateSessionSecret(secret: string, nodeEnv: string) {
   return secret
 }
 
+export function canCreateAccount(allowSelfRegistration: boolean) {
+  return allowSelfRegistration
+}
+
+export function passwordPolicyError(password: string) {
+  if (password.length < 8) return 'Password must be at least 8 characters.'
+  if (password.length > 1_024) return 'Password is too long.'
+  return null
+}
+
 function base64Url(input: string) {
   return Buffer.from(input).toString('base64url')
 }

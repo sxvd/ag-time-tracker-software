@@ -27,29 +27,31 @@ End-of-session feedback captures how a work session felt. It turns subjective ex
 
 ## UI Reference
 
-The original `docs/spec.md` includes this feedback reference:
+The feedback modal uses international-friendly product wording while preserving the stored enum values used by dashboards and exports:
 
 ```text
 End-of-session feedback:
 +---------------------------------------------------------------+
-| Session complete. How did it feel? (skippable)                |
-| Flow:        ( ) Great flow  ( ) Neutral  ( ) Friction        |
-| Efficiency:  ( ) Efficient   ( ) Manual   ( ) Wasteful        |
-| Energy:      ( ) High        ( ) OK       ( ) Drained         |
-| Blockers:    [ ] Waiting  [ ] Tool slow  [ ] Unclear reqs     |
-|              [ ] Interruptions  [ ] Context switching         |
-|              [ ] Meetings overran  [ ] None                   |
-| Note: [ optional ........................................ ]  |
-|                                          [Skip]  [Save]       |
+| Work session saved                                            |
+| Quick check-in                                                |
+| Focus:      ( ) Smooth focus  ( ) Normal  ( ) Distracted      |
+| Efficiency: ( ) Felt efficient ( ) Felt manual ( ) Felt wasteful|
+| Energy:     ( ) Energized     ( ) Fine    ( ) Drained         |
+| Any blockers? [ ] Waiting for someone [ ] Tool problem        |
+|              [ ] Unclear task [ ] Interrupted                 |
+|              [ ] Too much switching [ ] Meeting ran long      |
+|              [ ] None                                         |
+| Add a note: [ optional .................................... ] |
+|                                  [Skip]  [Save feedback]      |
 +---------------------------------------------------------------+
 ```
 
 ## Functional Requirements
 
-- Flow quality values: Great flow, Neutral, Friction.
-- Efficiency feel values: Felt efficient, Felt manual, Felt wasteful.
-- Energy values: High, OK, Drained.
-- Default blockers: Waiting on someone, Tool was slow or broke, Unclear requirements, Interruptions, Context switching, Meetings overran, None.
+- Stored flow quality values remain Great flow, Neutral, Friction; the feedback modal labels them as Smooth focus, Normal, Distracted.
+- Stored efficiency feel values and visible labels remain Felt efficient, Felt manual, Felt wasteful.
+- Stored energy values remain High, OK, Drained; the feedback modal labels them as Energized, Fine, Drained.
+- Stored default blockers remain Waiting on someone, Tool was slow or broke, Unclear requirements, Interruptions, Context switching, Meetings overran, None; the feedback modal labels them as Waiting for someone, Tool problem, Unclear task, Interrupted, Too much switching, Meeting ran long, None.
 - `None` should not combine with real blockers in saved feedback.
 - Feedback is optional/skippable.
 - Feedback must be stored as structured fields, not just text.
@@ -66,7 +68,8 @@ Relevant target data:
 
 Relevant current files:
 
-- `frontend/components/FeedbackModal.vue`
+- `frontend/features/feedback/FeedbackModal.vue`
+- `frontend/features/feedback/useEntries.ts`
 - `backend/api/timer-stop.post.ts`
 - `backend/utils/store.ts`
 - `shared/utils/time.ts`
@@ -76,6 +79,7 @@ Relevant current files:
 - `FeedbackModal.vue` provides radio groups for flow, efficiency, and energy plus blocker checkboxes and note.
 - The modal can emit `skip`.
 - `selectedBlockers` prevents `None` from staying selected with other blockers.
+- `useEntries.ts` preserves feedback save/skip ordering, safe failure copy, and the timer-stop request boundary.
 - `stopEntry` stores optional feedback and blockers as persisted `entry_feedback` and `entry_blockers` rows.
 - `buildDashboards`, `deriveBreezyDay`, `awardMedals`, and `exportRows` consume feedback/blocker data.
 
@@ -84,7 +88,7 @@ Relevant current files:
 - Feedback is persisted to PostgreSQL at runtime.
 - API-level validation rejects invalid feedback and unknown blocker values.
 - Skipped feedback behavior is represented by missing feedback, but acceptance expectations should be made explicit.
-- There are no component tests for the feedback modal.
+- Focused component tests cover feedback defaults, save/skip behavior, blocker exclusivity, stop ordering, and safe errors.
 - There are no API/integration tests that verify discrete feedback persistence.
 
 ## Acceptance Criteria

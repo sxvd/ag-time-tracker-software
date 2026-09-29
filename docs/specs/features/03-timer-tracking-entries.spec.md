@@ -16,11 +16,13 @@ The timer workflow records work sessions against tasks. Users can start, pause, 
 - Start, stop, pause, and resume a timer attached to a task.
 - Show live elapsed time.
 - Require a selected or created task before tracking.
+- Keep `New team task` as the primary Track-page collaboration action and present `Manual entry` as a lighter soft secondary button, because it is for retroactive recording rather than the main real-time tracking path. Individual work can still be created directly from the timer draft.
 - Record pauses and calculate duration.
 - Add manual/retroactive entries.
 - Edit existing entries.
 - Flag manual and edited entries.
 - Maintain a history log.
+- Paginate Today's entries in groups of five with previous/next navigation.
 - Recalculate derived metrics after edits.
 - Reject invalid or overlapping entries.
 
@@ -89,7 +91,7 @@ Add / Edit Tracking Entry:
 - Stop opens the feedback flow.
 - Manual entries require valid start and end times where end is after start.
 - Users can edit their own entries for task, category, client/project, start/end, pauses, feedback, blockers, note, and location label.
-- Editing an entry recalculates duration, idle seconds, estimate-vs-actual metrics, Breezy days, medals, and dashboards.
+- Editing an entry recalculates duration, Breezy days, medals, and dashboards while preserving server-authoritative idle totals, exclusions, decisions, and context-switch counts.
 - Manual and edited entries are visibly flagged in history and exports.
 
 ## Data And API
@@ -118,17 +120,20 @@ Relevant current API files:
 ## Current Implementation
 
 - `startEntry` creates an active persisted entry after checking task membership.
-- `pauseActiveEntry` creates one server-timestamped open pause; `resumeActiveEntry` closes it and calculates pause duration on the server.
-- `stopEntry` closes any open pause at the stop timestamp and stores idle seconds, context switches, feedback, blockers, and duration excluding persisted pauses.
+- Pause, resume, idle, and stop transitions serialize on the same locked active-entry row. `pauseActiveEntry` creates one server-timestamped open pause; `resumeActiveEntry` closes it and calculates pause duration on the server.
+- `stopEntry` reloads state after acquiring the lock, closes any open pause at the stop timestamp, and calculates duration from the freshly persisted pauses and excluded idle before storing feedback and blockers.
 - `createManualEntry` creates retroactive manual entries, records an audit event, and validates `endedAt > startedAt`.
-- `updateEntry` edits completed entries owned by the authenticated user, validates task access and overlap, replaces pauses/feedback/blockers in one transaction, and records before/after audit data.
-- `shared/utils/time.ts` calculates duration, pauses, idle decisions, context switches, estimate variance, Breezy day derivation, and medals.
-- `frontend/app.vue` handles live elapsed time, persisted pause/resume state restored by bootstrap, stop feedback, manual entry form, and entry history display with an edit-entry modal and edited marker.
+- `updateEntry` edits completed entries owned by the authenticated user, validates task access/overlap and idle-decision bounds, replaces editable pauses/feedback/blockers in one transaction, preserves server-authoritative idle/context fields and split-as-break pause windows, and records before/after audit data.
+- `shared/utils/time.ts` calculates duration, pauses, idle decisions, context switches, Breezy day derivation, and medals.
+- `frontend/features/tracking/useTimerSession.ts` coordinates live elapsed time plus start/pause/resume mutations and restores persisted pause state from bootstrap data.
+- `frontend/features/tracking/TimerPanel.vue` owns the existing timer/task markup, live readout, action labels and states, task-input focus forwarding, stats, and accessibility attributes.
+- `frontend/features/feedback/useEntries.ts` coordinates stop feedback, manual entries, and owned-entry edits; focused feature components own their existing modal markup.
+- `frontend/features/dashboard/EntryHistory.vue` renders Today's entries as semantic tables, five rows per page with previous/next navigation. Individual scope visibly labels Task, Time spent, Start → Finish, and Feeling, with an accessible visually hidden controls header and an icon-only Edit action; Team scope uses Task, Time spent, and Contributor. Entry rows contain values without repeating field labels, while Manual/Edited status and owned-entry editing remain available. Entry deletion is not exposed because no audited deletion workflow exists.
 
 ## Gaps
 
 - Runtime entries are persisted to PostgreSQL.
-- Editing refreshes current Breezy day and medal records synchronously; durable retry for failed derived refreshes remains a separate hardening change.
+- Derived refresh markers commit with entry mutations; synchronous processing records failure details and bootstrap retries unfinished Breezy/medal work.
 
 ## Acceptance Criteria
 
@@ -141,8 +146,10 @@ Relevant current API files:
 
 ## Tests And Verification
 
-- Unit tests for duration, pause handling, overlap validation, and estimate variance.
+- Unit tests for duration, pause handling, and overlap validation.
 - API tests for start, stop, manual entry, edit entry, and ownership enforcement.
-- PostgreSQL integration coverage for successful edits, audit data, export flags, task access, ownership, and overlap rejection.
-- PostgreSQL integration coverage for pause/resume ownership, duplicate/racing pauses, refresh state, and stopping while paused.
+- PostgreSQL integration coverage for successful edits, audit data, export flags, task access, ownership, overlap rejection, and preservation of keep/discard/split decisions plus their authoritative break pause.
+- PostgreSQL integration coverage includes pause/resume ownership, duplicate/racing pauses, stop/pause and stop/idle serialization, no terminal open pause, and duration consistency from locked state.
+- Focused timer-session unit tests cover restoration, elapsed calculations, request ordering, missing-task focus, refresh replacement, and interval cleanup; TimerPanel component tests cover labels, states, live values, classes, action order, and focus forwarding.
+- EntryHistory component coverage verifies scope-specific semantic headers, value-only rows, current Feeling/status output, the accessible icon-only Edit action, and the absence of an unsupported Delete action.
 - Browser check: create/select task, start, pause, resume, stop, save feedback, add manual entry, edit entry.

@@ -26,7 +26,7 @@ Medals are lightweight recognition for healthy, honest, and useful tracking patt
 
 ## UI Reference
 
-The original `docs/spec.md` does not include a dedicated medals ASCII mockup. Medals appear in the main navigation and personal dashboard requirements.
+The Personal Dashboard ASCII mock in `docs/spec.md` shows Medals as one compact two-column table with the shared headers `Medal` and `Status`. A medal's meaning appears directly beneath its name/status row.
 
 ## Functional Requirements
 
@@ -35,6 +35,7 @@ The original `docs/spec.md` does not include a dedicated medals ASCII mockup. Me
 - Awarded medals show award state and date when persisted.
 - Unawarded medals can be visible as collection goals.
 - Medal logic should be easy to extend.
+- The Personal Dashboard medal summary uses one shared `Medal`/`Status` header row, a primary row for each medal, a secondary meaning row directly beneath it, and the status labels `Awarded` and `Waiting`.
 
 ## Data And API
 
@@ -51,20 +52,22 @@ Relevant current files:
 
 - `backend/utils/store.ts`
 - `shared/utils/time.ts`
-- `frontend/app.vue`
+- `frontend/features/medals/MedalCollection.vue`
+- `frontend/features/dashboard/PersonalDashboard.vue`
 
 ## Current Implementation
 
-- `awardMedals` returns medal codes from persisted session summaries.
+- `awardMedals` returns medal codes from persisted session summaries; Sustainable Pace requires at least five minutes of persisted pause/rest time and is not awarded for kept or discarded idle.
 - `buildMedals` maps persisted medal definitions to awarded/unawarded state.
-- `frontend/app.vue` shows medal summary cards in the personal dashboard.
+- `MedalCollection.vue` renders the Personal Dashboard summary as a semantic two-column table with shared Medal and Status headers. Each description is linked to its medal and rendered in a secondary row; unawarded medals are labelled Waiting.
 
 ## Gaps
 
 - Medal definitions are seeded into `medals`.
 - Awards are persisted to `user_medals` when tracked or manual entries update derived records.
-- Award dates are not recorded by the current medal flow.
+- Persisted `user_medals` records include `awardedAt`; the current `ApiMedal` shape and `MedalCollection` summary do not expose or render that date.
 - The medal collection UI is a dashboard summary, not a full browsable collection.
+- Component contracts cover the shared two-column table header, associated meaning rows, and Awarded/Waiting presentation states for the current summary.
 - Team-based and Breezy milestone categories are not fully represented.
 
 ## Acceptance Criteria
@@ -74,9 +77,10 @@ Relevant current files:
 - Adding a new medal does not require rewriting core medal logic.
 - Demo data awards at least two medals.
 - Medals do not create public or company-facing performance rankings.
+- The Personal Dashboard shows one shared two-column medal table header rather than repeating labels or splitting medals into independent columns; each meaning is directly below the medal it explains.
 
 ## Tests And Verification
 
 - Unit tests for medal award conditions.
-- Integration tests for persisted medal award creation.
+- Integration tests cover persisted medal award creation, retry/idempotency, and actual-break-only Sustainable Pace semantics.
 - Browser check: complete Great flow session with blocker, confirm relevant medals appear.

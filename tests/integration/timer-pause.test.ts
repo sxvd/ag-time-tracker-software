@@ -71,8 +71,6 @@ describe('persisted timer pause lifecycle', () => {
     const stopInput: Parameters<typeof stopEntry>[0] & { pauses: Array<{ startedAt: string, endedAt: string }> } = {
       entryId: entry.id,
       userId: owner.id,
-      idleSeconds: 0,
-      contextSwitches: 0,
       pauses: [{ startedAt: startedAt.toISOString(), endedAt: new Date().toISOString() }],
       feedback: { flowQuality: 'Neutral', efficiencyFeel: 'Felt efficient', energy: 'OK', note: '' },
       blockers: ['None']

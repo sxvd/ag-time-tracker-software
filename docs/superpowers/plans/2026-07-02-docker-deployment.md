@@ -1,5 +1,10 @@
 # Docker Deployment Implementation Plan
 
+> Historical implementation plan. Its shortcut deploy commands and
+> checkout-local `version.json` step are superseded. Current production work
+> must follow `docs/operations/production-runbook.md`, use the full reviewed SHA,
+> and store backups outside the Git checkout.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add Docker packaging, local Docker development, and production deployment support for the Nuxt 3 + Prisma AirGradient Time Tracker app on `tools.airgradient.net`.

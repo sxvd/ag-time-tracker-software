@@ -118,3 +118,13 @@ Prefer this order for routine changes:
 3. Run the fastest useful check, usually `npm.cmd run test` on Windows.
 4. Run type/build/browser verification when the change touches shared types, Nuxt runtime behavior, or UI workflows.
 5. Update docs or milestones when behavior, known gaps, or verification evidence changes.
+
+## Incremental Execution And Review Gates
+
+- Execute only one implementation-plan checkbox step at a time.
+- After each step, run the focused verification appropriate to that step.
+- Summarize the files changed, behavior affected, verification commands and results, and any limitations.
+- Stop after the summary and wait for the user to type `next` before starting the next step.
+- Treat messages other than `next` as discussion or plan adjustment, not approval to advance.
+- Do not batch multiple plan steps together, even when they are closely related.
+- Do not stage, commit, push, deploy, or begin the next step unless the user explicitly requests it.

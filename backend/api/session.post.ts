@@ -1,4 +1,4 @@
-import { hashPassword, setSessionCookie, verifyPassword } from '../utils/auth'
+import { canCreateAccount, hashPassword, passwordPolicyError, setSessionCookie, verifyPassword } from '../utils/auth'
 import { prisma } from '../utils/prisma'
 import { publicState } from '../utils/store'
 import { requiredString } from '../utils/validation'
@@ -25,9 +25,18 @@ export default defineEventHandler(async (event) => {
   if (password.length > 1_024) {
     throw createError({ statusCode: 400, statusMessage: 'Password is too long.' })
   }
+  const passwordError = passwordPolicyError(password)
+  if (passwordError) {
+    throw createError({ statusCode: 400, statusMessage: passwordError })
+  }
 
   let user = await prisma.user.findUnique({ where: { email } })
   if (!user) {
+    const config = useRuntimeConfig(event)
+    const allowSelfRegistration = ['true', '1'].includes(String(config.allowSelfRegistration).toLowerCase())
+    if (!canCreateAccount(allowSelfRegistration)) {
+      throw createError({ statusCode: 401, statusMessage: 'Account is not provisioned.' })
+    }
     user = await prisma.user.create({
       data: {
         email,
@@ -36,7 +45,7 @@ export default defineEventHandler(async (event) => {
         passwordHash: await hashPassword(password)
       }
     })
-  } else if (!(await verifyPassword(password, user.passwordHash))) {
+  } else if (!user.passwordHash || !(await verifyPassword(password, user.passwordHash))) {
     throw createError({ statusCode: 401, statusMessage: 'Invalid email or password.' })
   }
 

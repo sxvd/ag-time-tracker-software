@@ -1,37 +1,43 @@
 # 01 Authentication And Profile
 
-Source: extracted from the preserved full brief in `docs/spec.md`.
+Source: extracted from the preserved full brief in `docs/spec.md` and updated to reflect the approved password-only production flow.
 
 ## Summary
 
-Authentication lets company users sign in, keep a secure session across refreshes, and maintain a basic profile used for team-level dashboard rollups.
+Authentication lets AirGradient company users create an account on first sign-in, return through a persisted secure session, and maintain their identity and application preferences. A user's Team preference uses the same canonical values as task categories, while dashboard reporting still aggregates by the category attached to each task.
 
 ## Users
 
-- Individual team members and freelancers tracking their own work.
-- Company users who need team-level aggregated insight.
+- AirGradient team members with an `@airgradient.com` work email.
+- Authenticated company users viewing aggregate, process-focused company insight.
 
 ## Scope
 
-- Sign up with display name, work email, password, and team.
-- Sign in with email and password.
-- Restrict authentication to `@airgradient.com` email accounts unless the product domain rule is changed.
-- Persist signed-in state through a secure session or JWT.
-- Sign out.
-- Update display name and team from the profile page.
-- Protect pages and API routes with clear `401` or `403` responses.
-- Document seed/demo credentials and required auth/session environment variables.
+- Use one email-and-password form for sign-in and automatic first-time registration.
+- Accept only email addresses ending in the exact `@airgradient.com` domain.
+- Require passwords from 8 through 1,024 characters for both registration and sign-in.
+- Create a missing company-email account when `NUXT_ALLOW_SELF_REGISTRATION=true`.
+- Hash every password server-side with scrypt and a unique random salt.
+- Persist signed-in state through a server-managed application session.
+- Sign out by revoking the persisted session.
+- Update display name and Team from the full Settings page.
+- Protect pages and API routes with server-side `401` or `403` responses.
+- Document seeded credentials and required authentication environment variables.
 
 ## Out Of Scope
 
-- SSO.
-- Password reset.
+- Password reset or account recovery.
+- Email mailbox ownership verification.
+- Multi-factor authentication.
+- External identity-provider authentication.
 - Multi-tenant company domain management.
-- Admin user management.
+- Administrator user management and session revocation UI.
 
-## UI Reference
+## UI Behavior
 
-The original `docs/spec.md` includes this authentication reference:
+### Historical Original UI Reference
+
+The following reference is retained as historical context. The current target keeps account-level Team selection for the user's real organizational team, but the available Team values use the same canonical list as task categories:
 
 ```text
 Sign Up / Sign In:
@@ -52,64 +58,99 @@ Sign Up / Sign In:
 +---------------------------------------------------------------+
 ```
 
+Implementation note: the approved flow replaces the two visible Sign Up / Sign In paths with one email-and-password form. A missing `@airgradient.com` account is created automatically when self-registration is enabled. Display name and Team remain editable from Settings. Team uses the canonical work-category list: Software, Hardware, Firmware, Communication, Research, Commerce, Production, Other.
+
+The authentication UI has one path:
+
+1. Enter an AirGradient work email and password.
+2. If the account exists, verify its salted password hash.
+3. If the account does not exist and self-registration is enabled, create it with a derived display name and a salted password hash. Until the legacy database column is removed, the backend may populate its required compatibility value without exposing or using it for reporting.
+4. Establish the same persisted application session in either case.
+
+Safe validation messages may identify input-policy failures, including the company-email rule and the 8-character minimum. Credential failures for an existing account use the generic `Invalid email or password.` message. Unknown server details must not be rendered in the UI.
+
+After authentication, the entire sidebar profile card is the account trigger. It opens a labelled account dialog containing identity, Settings, appearance controls, and Log out. Log out is no longer a permanent standalone sidebar button; it remains available from this account dialog and still revokes the persisted server session.
+
 ## Functional Requirements
 
-- Reject non-company email addresses before account creation and sign in.
-- Reject empty passwords.
-- Store password hashes server-side. Never store, log, export, or seed plaintext passwords.
-- Signed-in state survives refresh.
-- Protected API routes require an authenticated user.
-- Profile team selection supports team filters in company dashboards.
-- Demo credentials are documented in `README.md`.
-- `.env.example` describes required session/auth secrets.
+- Normalize email addresses to lowercase before lookup.
+- Reject non-company email addresses on the server.
+- Reject empty passwords, passwords shorter than 8 characters, and passwords longer than 1,024 characters before database lookup.
+- Accept passwords of at least 64 characters.
+- Never store or log plaintext passwords.
+- Store password hashes in `scrypt$<salt>$<derived-key>` form with a new salt for every hash.
+- Allow production account creation only when `NUXT_ALLOW_SELF_REGISTRATION` explicitly evaluates to `true` or `1`.
+- Keep signed-in state across refreshes.
+- Store only a SHA-256 hash of the signed session token in PostgreSQL.
+- Set the browser session cookie as HTTP-only, `SameSite=Lax`, path `/`, and secure when served through HTTPS.
+- Revoke the persisted session during sign-out.
+- Require an authenticated session on protected API routes.
+- Allow every authenticated AirGradient user to view aggregate company data while keeping personal raw detail private.
+- Account-level Team identifies where the user belongs, using the same value set as task categories. Company Dashboard analytical filtering still comes from the Category attached to each task.
 
 ## Data And API
 
-Relevant target data:
+Relevant data:
 
-- `users`: id, email, display_name, password_hash, team, created_at.
-- `auth_sessions` or equivalent session/JWT persistence.
-- `settings`: user-level preferences used after sign in.
+- `users`: id, email, display_name, non-null password_hash, legacy team compatibility field, created_at.
+- `auth_sessions`: id, user, token_hash, expiry, revocation, last-seen, and creation timestamps.
+- `settings`: user-level preferences loaded after sign-in.
 
-Relevant current API files:
+Relevant implementation files:
 
 - `backend/api/session.post.ts`
 - `backend/api/session.delete.ts`
 - `backend/api/bootstrap.get.ts`
+- `backend/api/account-settings.patch.ts`
 - `backend/api/profile.patch.ts`
 - `backend/utils/auth.ts`
 - `backend/utils/store.ts`
+- `backend/prisma/schema.prisma`
+- `backend/prisma/seed.mjs`
+- `frontend/features/settings/AccountMenu.vue`
+- `frontend/features/settings/SettingsPage.vue`
+- `frontend/features/settings/useAccountSettings.ts`
+- `frontend/utils/auth-error.ts`
 
 ## Current Implementation
 
-- `backend/api/session.post.ts` accepts an `@airgradient.com` email and password.
-- Unknown emails are auto-created with a display name derived from the email and team `Software`.
-- Session tokens are HMAC-signed and stored in an HTTP-only `breezy_session` cookie by `backend/utils/auth.ts`.
-- API protection is implemented with `requireSessionUser`.
-- `profile.patch.ts` updates display name and team through Prisma.
-- `session.delete.ts` clears the session cookie and revokes persisted `auth_sessions` rows.
+- Development and production Compose enable automatic company-email registration.
+- `backend/api/session.post.ts` applies the domain and password policy before account lookup.
+- Missing users are created through Prisma with a salted scrypt hash.
+- Existing users are authenticated with a timing-safe password comparison.
+- Session tokens are HMAC-signed, stored in the HTTP-only `breezy_session` cookie, and represented in PostgreSQL by a token hash.
+- `requireSessionUser` and `requireSessionIdentity` enforce protected API access.
+- `account-settings.patch.ts` updates display name, Team, and application preferences atomically through a Prisma transaction; `profile.patch.ts` remains compatible for legacy callers but is not used by the current Settings UI.
+- `AccountMenu.vue` owns the accessible account trigger/dialog and relocates Settings, appearance, and Log out into one account entry point.
+- `SettingsPage.vue` owns the profile draft and emits the complete validated payload to the settings orchestration without calling backend APIs directly.
+- `useAccountSettings.ts` owns runtime settings synchronization, the atomic save request, validation-message mapping, and uncertain-response reconciliation.
+- `session.delete.ts` clears the cookie and revokes the persisted session row.
+- Seeded demo users use the policy-compliant password documented in `README.md`.
 
-## Gaps
+Current target: keep Team in account settings, but keep its allowed values aligned with the canonical task-category list so users do not see two competing taxonomies.
 
-- There is no separate sign-up endpoint with display name and team selection.
-- Runtime auth data is stored in PostgreSQL through Prisma.
-- Password handling uses scrypt hashes server-side.
-- Existing users are authenticated by verifying the stored password hash.
-- `auth_sessions` is present in the Prisma schema.
-- The sign-in UI does not expose the full create-account form from the mockup.
+## Security Limitations
+
+- Domain-string validation does not prove that the person controls the submitted mailbox. Deployment must remain restricted to the trusted internal access boundary until mailbox verification or another stronger authentication factor is implemented.
+- There is no login rate limiting or temporary account lockout.
+- There is no password reset, forced rotation, or administrator session-management interface.
+- The minimum password length is intentionally 8 characters; stronger organization-wide password requirements are deferred.
 
 ## Acceptance Criteria
 
-- A user can create an account with display name, company email, password, and team.
-- A user can sign in and refresh without losing the session.
-- Non-company emails are rejected.
-- Protected routes return `401` when no valid session is present.
-- A user can update display name and team.
-- No plaintext passwords appear in code, logs, exports, seed data, or database rows.
+- A missing `@airgradient.com` user can submit a password of at least 8 characters and receive a persisted account and session when self-registration is enabled.
+- A seven-character password is rejected before account lookup.
+- An existing user can sign in with the correct password and refresh without losing the session.
+- Wrong credentials return a safe generic error.
+- A non-company email is rejected.
+- Signing out revokes the server-side session and removes authenticated access.
+- A user can update display name and Team; Team uses the same canonical values as task categories.
+- Only salted scrypt hashes—not plaintext passwords—appear in database rows.
+- Protected routes return `401` without a valid session.
 
 ## Tests And Verification
 
-- Unit or integration tests for company email validation.
-- API tests for sign up, sign in, sign out, current session, and profile update.
-- Browser check: sign in, refresh, confirm protected app state remains available, sign out, confirm protected state is unavailable.
-- Database verification once PostgreSQL persistence is implemented.
+- Unit tests cover company-domain validation, password boundaries, production provisioning policy, session-secret requirements, safe frontend error mapping, and Prisma nullability.
+- Integration tests cover seeded credentials, session token storage, task permissions, and database persistence.
+- Browser verification covers seven-character rejection, sign-in, refresh persistence, sign-out, and first-time account creation.
+- Database verification checks non-null salted hashes and confirms plaintext passwords are absent.

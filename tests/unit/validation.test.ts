@@ -25,8 +25,8 @@ describe('API runtime validation', () => {
   })
 
   it('validates optional integers, booleans, and bounded string arrays', () => {
-    expect(optionalBoundedInteger('estimateMinutes', undefined, { min: 1, max: 10_000 })).toBeUndefined()
-    expect(optionalBoundedInteger('estimateMinutes', 60, { min: 1, max: 10_000 })).toBe(60)
+    expect(optionalBoundedInteger('idleSeconds', undefined, { min: 0, max: 10_000 })).toBeUndefined()
+    expect(optionalBoundedInteger('idleSeconds', 60, { min: 0, max: 10_000 })).toBe(60)
     expect(booleanValue('muted', false)).toBe(false)
     expect(() => booleanValue('muted', 'false')).toThrow(/muted/)
     expect(stringArray('members', ['u1', 'u2', 'u1'], { itemMax: 128, maxItems: 20 })).toEqual(['u1', 'u2'])

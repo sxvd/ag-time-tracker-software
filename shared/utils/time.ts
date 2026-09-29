@@ -1,3 +1,5 @@
+import { awardMedalsFromSessions, deriveBreezyDayFromSessions } from './breezy.mjs'
+
 export type IdleDecision = 'keep' | 'discard' | 'break'
 export type FlowQuality = 'Great flow' | 'Neutral' | 'Friction'
 export type EfficiencyFeel = 'Felt efficient' | 'Felt manual' | 'Felt wasteful'
@@ -19,7 +21,24 @@ export interface SessionForAwards {
   energy?: EnergyLevel
   blockers?: string[]
   idleSeconds: number
+  breakSeconds: number
   contextSwitches: number
+}
+
+export interface ContextSwitchTransition {
+  previous: 'visible' | 'hidden'
+  current: 'visible' | 'hidden'
+  active: boolean
+  paused: boolean
+  enabled: boolean
+}
+
+export function shouldRecordContextSwitch(input: ContextSwitchTransition) {
+  return input.previous === 'visible'
+    && input.current === 'hidden'
+    && input.active
+    && !input.paused
+    && input.enabled
 }
 
 export function secondsBetween(startedAt: string | Date, endedAt: string | Date) {
@@ -44,38 +63,28 @@ export function countContextSwitches(previousCount: number, becameHidden: boolea
   return becameHidden ? previousCount + 1 : previousCount
 }
 
-export function estimateVarianceMinutes(estimateMinutes: number | null | undefined, actualSeconds: number) {
-  if (!estimateMinutes) return null
-  return Math.round(actualSeconds / 60 - estimateMinutes)
+export function formatTrackedDuration(durationSeconds: number) {
+  const seconds = Number.isFinite(durationSeconds) ? Math.max(0, Math.floor(durationSeconds)) : 0
+  if (seconds === 0) return '0 minutes'
+  if (seconds < 60) return '< 1 minute'
+
+  const totalMinutes = Math.floor(seconds / 60)
+  const hours = Math.floor(totalMinutes / 60)
+  const minutes = totalMinutes % 60
+  const parts: string[] = []
+
+  if (hours > 0) parts.push(`${hours} ${hours === 1 ? 'hour' : 'hours'}`)
+  if (minutes > 0) parts.push(`${minutes} ${minutes === 1 ? 'minute' : 'minutes'}`)
+
+  return parts.join(' ')
 }
 
 export function deriveBreezyDay(sessions: SessionForAwards[]) {
-  const trackedHours = sessions.reduce((sum, session) => sum + session.durationSeconds, 0) / 3600
-  const greatFlow = sessions.filter((session) => session.flowQuality === 'Great flow').length
-  const friction = sessions.filter((session) => session.flowQuality === 'Friction').length
-  const switches = sessions.reduce((sum, session) => sum + session.contextSwitches, 0)
-  const blockers = sessions.reduce((sum, session) => sum + (session.blockers?.filter((blocker) => blocker !== 'None').length || 0), 0)
-  const breaks = sessions.reduce((sum, session) => sum + session.idleSeconds, 0)
-  const airClarityScore = Math.max(30, Math.min(100, Math.round(70 + greatFlow * 8 + Math.min(breaks / 300, 10) - friction * 9 - switches * 1.5 - blockers * 5)))
-  let mood = 'idle'
-  if (airClarityScore >= 86 && trackedHours > 0) mood = 'cheering'
-  else if (airClarityScore >= 74) mood = 'happy'
-  else if (airClarityScore >= 55) mood = 'waving'
-  else mood = 'sleepy'
-  return { mood, airClarityScore }
+  return deriveBreezyDayFromSessions(sessions)
 }
 
 export function awardMedals(sessions: SessionForAwards[]) {
-  const totalSeconds = sessions.reduce((sum, session) => sum + session.durationSeconds, 0)
-  const blockers = sessions.flatMap((session) => session.blockers || [])
-  const medals = new Set<string>()
-  if (sessions.some((session) => session.flowQuality === 'Great flow')) medals.add('flow-state')
-  if (sessions.length >= 5) medals.add('steady-breeze')
-  if (totalSeconds >= 8 * 3600) medals.add('in-the-zone')
-  if (blockers.some((blocker) => blocker !== 'None')) medals.add('straight-shooter')
-  if (sessions.some((session) => session.idleSeconds >= 300)) medals.add('sustainable-pace')
-  if (sessions.some((session) => session.contextSwitches <= 1 && session.durationSeconds >= 1800)) medals.add('single-tasker')
-  return [...medals]
+  return awardMedalsFromSessions(sessions)
 }
 
 export function toCsv(rows: Record<string, unknown>[]) {

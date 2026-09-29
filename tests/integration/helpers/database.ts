@@ -24,12 +24,14 @@ export async function resetTestDatabase() {
   assertTestDatabase(databaseUrl())
   await integrationPrisma.$transaction([
     integrationPrisma.export.deleteMany(),
+    integrationPrisma.derivedRefreshJob.deleteMany(),
     integrationPrisma.breezyNudge.deleteMany(),
     integrationPrisma.userMedal.deleteMany(),
     integrationPrisma.breezyDay.deleteMany(),
     integrationPrisma.entryAuditEvent.deleteMany(),
     integrationPrisma.entryBlocker.deleteMany(),
     integrationPrisma.entryFeedback.deleteMany(),
+    integrationPrisma.entryIdleDecision.deleteMany(),
     integrationPrisma.entryPause.deleteMany(),
     integrationPrisma.trackingPresence.deleteMany(),
     integrationPrisma.timeEntry.deleteMany(),

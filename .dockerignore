@@ -13,6 +13,8 @@ pnpm-debug.log*
 !.env.example
 artifacts
 docs/example_UI
+/aq-time-tracker-software
+/backups/
 coverage
 dist
 tmp

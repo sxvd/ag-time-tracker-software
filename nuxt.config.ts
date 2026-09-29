@@ -1,3 +1,5 @@
+import { themeBootstrapScript } from './shared/utils/theme'
+
 export default defineNuxtConfig({
   compatibilityDate: '2026-06-09',
   devtools: { enabled: false },
@@ -8,6 +10,9 @@ export default defineNuxtConfig({
     baseURL: process.env.NUXT_APP_BASE_URL || '/',
     head: {
       title: 'AirGradient Time Tracker',
+      script: [
+        { innerHTML: themeBootstrapScript(), tagPosition: 'head' }
+      ],
       meta: [
         { name: 'viewport', content: 'width=device-width, initial-scale=1' },
         { name: 'description', content: 'AirGradient internal time tracking with Breezy.' }
@@ -20,13 +25,20 @@ export default defineNuxtConfig({
     }
   },
   runtimeConfig: {
-    aiInsightsApiKey: process.env.NUXT_AI_INSIGHTS_API_KEY || '',
-    sessionPassword: process.env.NUXT_SESSION_PASSWORD || ''
+    sessionPassword: process.env.NUXT_SESSION_PASSWORD || '',
+    allowSelfRegistration: process.env.NUXT_ALLOW_SELF_REGISTRATION || 'true'
   },
   typescript: {
     strict: true
   },
   nitro: {
+    externals: {
+      inline: [
+        /shared\/utils\/breezy\.mjs$/,
+        /shared\/constants\/categories\.mjs$/,
+        /shared\/constants\/account-settings\.mjs$/
+      ]
+    },
     experimental: {
       wasm: true
     }
