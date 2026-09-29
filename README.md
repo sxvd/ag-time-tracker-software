@@ -220,10 +220,10 @@ The tools host Nginx route should proxy `/tracker` to:
 http://tracker:5500
 ```
 
-Every production migration and deployment must follow the [mandatory production runbook](docs/operations/production-runbook.md). It records the full reviewed candidate SHA, creates and verifies an external protected backup, checks migration status, and defines health, rollback, and isolated restore gates. Do not use an unreviewed shortcut or a moving branch reference.
+Every production migration and deployment must follow the [mandatory production runbook](docs/operations/production-runbook.md). Production automation pulls the latest fast-forward update from `main`, creates a unique timestamped image, and deploys it after the required backup and migration gates. Keep `main` protected so only reviewed, tested changes can trigger production deployment.
 
-Only after completing the runbook gates, deploy that same full reviewed SHA from `/opt/apps/tracker`:
+The production scheduler invokes the deployment script from `/opt/apps/tracker` without requiring a manually supplied Git SHA:
 
 ```bash
-./deploy.sh --force --no-pull --expected-sha "$CANDIDATE_SHA"
+./deploy.sh
 ```

@@ -32,6 +32,7 @@ CMD ["npm", "run", "test"]
 FROM deps AS build
 COPY . .
 ENV NODE_ENV=production
+RUN npm run verify:production
 RUN npx prisma generate --schema=backend/prisma/schema.prisma
 RUN npm run build
 

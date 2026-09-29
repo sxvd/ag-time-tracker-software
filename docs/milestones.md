@@ -95,14 +95,14 @@ Status last updated: 2026-09-28.
 
 - Nuxt is pinned to `3.21.10`; the patched dependency tree previously passed the production audit before the 2026-08-25 advisories were published.
 - The spec-aligned frontend feature refactor is complete without a commit: `frontend/app.vue` is now a 473-line authenticated shell and timer lifecycle has one coordinator.
-- Final whole-worktree review hardening closed all eight Important findings: consent-aware location writes, authoritative entry edits, bearer blob exports, owner/member/company privacy, idle idempotency/overlap/settings enforcement, serialized timer transitions, actual-break Breezy semantics, and immutable-SHA deployment.
-- Final re-review artifact hardening moved production dumps/checksums to a protected external directory, removed unused checkout-local version output, made backup/deploy Git-cleanliness executable regression contracts, and aligned README deployment guidance with the mandatory reviewed-SHA runbook.
+- Final whole-worktree review hardening closed the Important product and data findings: consent-aware location writes, authoritative entry edits, bearer blob exports, owner/member/company privacy, idle idempotency/overlap/settings enforcement, serialized timer transitions, and actual-break Breezy semantics. Deployment now follows the tools host's automatic latest-`main` flow with unique timestamped images.
+- Final re-review artifact hardening moved production dumps/checksums to a protected external directory, removed unused checkout-local version output, made backup/deploy Git-cleanliness executable regression contracts, and aligned README deployment guidance with the production runbook.
 - `npm run test`: passed, 119 unit tests.
 - `npm run test:component`: passed, 77 component tests.
 - PostgreSQL integration suite: passed, 44 tests against all six migrations.
 - `npm run lint`: passed.
 - `npm run build`: passed.
-- `npm run verify:production`: passed all 16 production configuration checks, including immutable reviewed-SHA verification before migration and startup.
+- `npm run verify:production`: verifies the automatic latest-`main` deployment contract, Docker-based configuration verification, migration ordering, and timestamped production images.
 - Docker aggregate `test` service: passed after rebuilding with npm 10, including 119 unit tests, all six migrations, and 44 PostgreSQL integration tests. The test-only image now includes Git so the real repository-boundary deployment checks also run in Docker; the production runner remains unchanged by that package.
 - The root Vue runtime is pinned to `3.5.41`, matching Nuxt's required runtime range; this fixed a built-Nitro 500 caused by an incomplete split Vue bundle. The rebuilt production runner served `/tracker/api/health`, and a two-session smoke proved bearer-scoped exports even when each request carried the other session's cookie.
 - Final desktop and actual 390px browser parity covered password sign-in/logout, Account, System/Light/Dark, Settings save/restore, local task invitation, timer pause/reload/resume, a one-minute idle decision, feedback-before-stop, feedback, manual/edit flows, dashboards, isolated insights, medals, export URLs, and Breezy Journey. No horizontal overflow or browser console warning/error was observed.

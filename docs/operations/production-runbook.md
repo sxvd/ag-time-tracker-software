@@ -10,7 +10,7 @@ The current production contract is:
 - protected backup directory: `/var/backups/ag-time-tracker` with mode `700`, owned by the deployment operator and outside the Git checkout
 - application container: `aq-time-tracker`
 - PostgreSQL container: `aq-time-tracker-postgres`
-- application image: `ag-time-tracker:<git-short-sha>`
+- application image: `ag-time-tracker:<UTC-deploy-timestamp>`
 - host health URL: `http://127.0.0.1:5500/tracker/api/health`
 - public base URL: `https://tools.airgradient.net/tracker/`
 
@@ -30,19 +30,18 @@ export BACKUP_DIR
 test -d "$BACKUP_DIR"
 test "$(stat -c '%a' "$BACKUP_DIR")" = "700"
 ./scripts/production-backup.sh --dry-run >/dev/null
-npm run verify:production
 docker network inspect app-network >/dev/null
 docker compose -f docker-compose.prod.yml --env-file .env.production config --quiet
 ```
 
-Stop if any command fails. Record the candidate and currently running image before changing anything:
+Stop if any command fails. Pull the latest reviewed `main` revision and record the currently running image before changing anything:
 
 ```bash
 git pull --ff-only
-CANDIDATE_SHA="$(git rev-parse HEAD)"
-CANDIDATE_TAG="${CANDIDATE_SHA:0:12}"
+DEPLOY_TAG="$(date -u +%Y%m%dT%H%M%SZ)"
+export DEPLOY_TAG
 PREVIOUS_IMAGE="$(docker inspect --format '{{.Config.Image}}' aq-time-tracker 2>/dev/null || true)"
-printf 'Candidate SHA: %s\nPrevious image: %s\n' "$CANDIDATE_SHA" "${PREVIOUS_IMAGE:-first deployment}"
+printf 'Deploy tag: %s\nPrevious image: %s\n' "$DEPLOY_TAG" "${PREVIOUS_IMAGE:-first deployment}"
 ```
 
 Keep `PREVIOUS_IMAGE` in the private change record. It contains no secret, but it is required for application rollback.
@@ -84,15 +83,15 @@ before continuing. A file that exists only on the same host and Docker volume
 is not sufficient recovery protection. `/backups/` is ignored only as defense
 in depth; production backup files must never be written inside the repository.
 
-## 3. Build The Candidate And Check Migration Status
+## 3. Build The Release And Check Migration Status
 
-Build the exact candidate SHA, then run the read-only Prisma migration status command against production PostgreSQL:
+Build the timestamped release image, then run the read-only Prisma migration status command against production PostgreSQL:
 
 ```bash
-IMAGE_TAG="$CANDIDATE_TAG" \
+IMAGE_TAG="$DEPLOY_TAG" \
   docker compose -f docker-compose.prod.yml --env-file .env.production build web
 
-IMAGE_TAG="$CANDIDATE_TAG" \
+IMAGE_TAG="$DEPLOY_TAG" \
   docker compose -f docker-compose.prod.yml --env-file .env.production --profile tools \
   run --rm migrate npx prisma migrate status --schema=backend/prisma/schema.prisma
 ```
@@ -101,15 +100,14 @@ Review every pending migration against the release. Stop if Prisma reports a fai
 
 ## 4. Deploy
 
-Only continue after the backup, checksum, off-host copy, candidate build, and migration review are complete:
+Only continue after the backup, checksum, off-host copy, candidate build, and migration review are complete. `--no-pull` reuses the revision already reviewed during this runbook; the normal automated invocation omits it and pulls the latest `main` update:
 
 ```bash
 cd /opt/apps/tracker
-test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
-./deploy.sh --force --no-pull --expected-sha "$CANDIDATE_SHA"
+DEPLOY_TAG="$DEPLOY_TAG" ./deploy.sh --force --no-pull
 ```
 
-The script refuses a missing or changed reviewed SHA, performs no second pull in this runbook flow, verifies production configuration, builds the immutable candidate, rechecks the SHA before migration and startup, runs `prisma migrate deploy`, and starts the web service in that order. Do not start the web service manually if migration fails.
+The Docker build runs `npm run verify:production` inside the build container, so the production host does not require Node.js or npm. The script builds a uniquely tagged image, runs `prisma migrate deploy`, and starts the web service in that order. Do not start the web service manually if configuration verification or migration fails.
 
 ## 5. Health And Logs
 

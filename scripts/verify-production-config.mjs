@@ -14,7 +14,6 @@ const dockerignore = readProjectFile('.dockerignore')
 const buildIndex = deployScript.indexOf('build web')
 const migrationIndex = deployScript.indexOf('--profile tools run --rm migrate')
 const webStartIndex = deployScript.indexOf('up -d web')
-const candidateVerificationCount = deployScript.match(/verify_candidate/g)?.length || 0
 
 const checks = [
   ['production PostgreSQL password is required', compose.includes('${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}')],
@@ -31,8 +30,8 @@ const checks = [
   ['deployment builds before migration', buildIndex >= 0 && migrationIndex > buildIndex],
   ['deployment migrates before starting web', migrationIndex >= 0 && webStartIndex > migrationIndex],
   ['deployment synchronization is fast-forward only', deployScript.includes('git pull --ff-only') && !deployScript.includes('git pull 2>&1')],
-  ['deployment requires an immutable reviewed SHA', deployScript.includes('--expected-sha is required') && deployScript.includes('Deployment candidate mismatch')],
-  ['deployment rechecks the candidate before migration and startup', candidateVerificationCount >= 4],
+  ['deployment does not require a manually supplied Git SHA', !deployScript.includes('--expected-sha') && !deployScript.includes('EXPECTED_SHA')],
+  ['deployment images use unique release tags', deployScript.includes('DEPLOY_TAG') && deployScript.includes('%Y%m%dT%H%M%SZ')],
   ['legacy tracker is excluded from the image', dockerignore.split(/\r?\n/).includes('/aq-time-tracker-software')],
   ['legacy tracker is absent from production Compose', !compose.includes('aq-time-tracker-software')]
 ]
