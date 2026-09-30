@@ -150,14 +150,13 @@ describe('current frontend behavior contract', () => {
     })
     const wrapper = await mountContractApp({ fetchMock })
 
-    expect(wrapper.text()).toContain('Welcome to the time tracker')
-    await button(wrapper, 'Sign in').trigger('click')
-
     expect(wrapper.text()).toContain('Sign in to continue')
+    expect(wrapper.get('[role="tablist"]').attributes('aria-label')).toBe('Choose account access')
     expect(wrapper.get('input[autocomplete="email"]').attributes('placeholder')).toBe('name@airgradient.com')
     expect(wrapper.get('input[autocomplete="current-password"]').attributes('placeholder')).toBe('At least 8 characters')
-    expect(wrapper.get('#password-help').text()).toContain('Use at least 8 characters')
-    expect(button(wrapper, 'Continue').attributes('type')).toBe('submit')
+    expect(wrapper.get('#password-help').text()).toContain('existing AirGradient account password')
+    expect(exactButtons(wrapper, 'Sign in')).toHaveLength(2)
+    expect(exactButtons(wrapper, 'Sign in').some(candidate => candidate.attributes('type') === 'submit')).toBe(true)
   })
 
   it('preserves representative task and timer request contracts', async () => {

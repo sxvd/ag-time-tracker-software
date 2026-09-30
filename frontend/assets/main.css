@@ -206,6 +206,43 @@ a {
   width: 100%;
 }
 
+.auth-mode-toggle {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  width: 100%;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+
+.auth-mode-toggle button {
+  min-height: 42px;
+  border: 1px solid transparent;
+  border-radius: calc(var(--radius) - 3px);
+  background: transparent;
+  color: var(--text-mid);
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.auth-mode-toggle button:hover {
+  color: var(--text);
+}
+
+.auth-mode-toggle button:focus-visible {
+  outline: 3px solid var(--blue-soft);
+  outline-offset: 1px;
+}
+
+.auth-mode-toggle button.active {
+  border-color: var(--border);
+  background: var(--surface);
+  box-shadow: 0 2px 8px rgba(2, 87, 154, 0.12);
+  color: var(--blue);
+}
+
 .form-help {
   color: var(--text-faint);
   font-size: 0.86rem;

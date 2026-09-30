@@ -6,7 +6,13 @@ const safeMessages = new Set([
   'Password must be at least 8 characters.',
   'Password is too long.',
   'Invalid email or password.',
-  'Account is not provisioned.'
+  'Account is not provisioned.',
+  'Choose sign in or register.',
+  'displayName is required.',
+  'displayName must be at most 100 characters.',
+  'team must be one of: Software, Hardware, Firmware, Communication, Research, Commerce, Production, Other.',
+  'Account already exists. Sign in instead.',
+  'Registration is currently unavailable.'
 ])
 
 interface AuthErrorEnvelope {
