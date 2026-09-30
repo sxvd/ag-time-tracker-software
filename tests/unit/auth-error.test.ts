@@ -14,6 +14,18 @@ describe('sign-in error presentation', () => {
     [
       { statusMessage: 'Use an AirGradient work email.' },
       'Use an AirGradient work email.'
+    ],
+    [
+      { data: { statusMessage: 'Account already exists. Sign in instead.' } },
+      'Account already exists. Sign in instead.'
+    ],
+    [
+      { data: { statusMessage: 'displayName is required.' } },
+      'displayName is required.'
+    ],
+    [
+      { data: { statusMessage: 'team must be one of: Software, Hardware, Firmware, Communication, Research, Commerce, Production, Other.' } },
+      'team must be one of: Software, Hardware, Firmware, Communication, Research, Commerce, Production, Other.'
     ]
   ])('shows a safe authentication error returned by the API', (error, expected) => {
     expect(signInErrorMessage(error)).toBe(expected)

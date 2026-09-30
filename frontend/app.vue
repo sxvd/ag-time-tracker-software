@@ -219,14 +219,14 @@ const {
   publish: breezyRuntime.publish
 })
 const {
+  authMode,
   isAuthenticated,
   isRestoringSession,
   logout,
-  openSignIn,
   restoreSession,
-  showSignIn,
+  selectAuthMode,
   signInError,
-  submitSignIn
+  submitAuthentication
 } = useSession({
   authFetch,
   saveTabSessionToken,
@@ -370,10 +370,10 @@ async function handleDismissBreezyNudge() {
   <SignInPanel
     v-if="isRestoringSession || !isAuthenticated"
     :restoring="isRestoringSession"
-    :show-form="showSignIn"
     :error="signInError"
-    @open="openSignIn"
-    @submit="submitSignIn"
+    :mode="authMode"
+    @select-mode="selectAuthMode"
+    @submit="submitAuthentication"
   />
 
   <main v-else-if="state" class="app-shell">

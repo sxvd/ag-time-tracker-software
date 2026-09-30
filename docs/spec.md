@@ -200,15 +200,22 @@ What sets this application apart is Breezy, AirGradient's mascot and the emotion
 
 Sign Up / Sign In:
 +---------------------------------------------------------------+
-| AirGradient Time Tracker                         Breezy (^_^) |
+| [ AirGradient logo ]                                          |
 +---------------------------------------------------------------+
+| AIRGRADIENT ACCOUNT                                           |
+| Sign in to continue                                           |
+|                                                               |
+| [ Sign in ] [ Register ]                                     |
+|                                                               |
 | Work email     [ name@airgradient.com..................... ]  |
+| Name           [ Alex Kim................................. ]  | Register only
+| Team           [ Software v ]                                | Register only
 | Password       [ ********................................. ]  |
 |                                                               |
-| [ Sign in or create account ]                                |
+| [ Sign in / Create account — follows selected mode ]         |
 |                                                               |
 | Rules: @airgradient.com only, password hashed server-side,    |
-| category is selected per task, not assigned to the account.  |
+| registration is explicit, category is selected per task.     |
 +---------------------------------------------------------------+
 
 Main Timer View:

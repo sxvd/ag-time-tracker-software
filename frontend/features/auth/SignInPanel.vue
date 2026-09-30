@@ -1,28 +1,45 @@
 <script setup lang="ts">
+import { DEFAULT_CATEGORY_NAMES } from '~~/shared/constants/categories.mjs'
 import { withAppBase } from '~~/shared/utils/url'
+import type { AuthMode } from './useSession'
 
 const props = withDefaults(defineProps<{
   restoring: boolean
-  showForm?: boolean
   error?: string
+  mode?: AuthMode
 }>(), {
-  showForm: false,
-  error: ''
+  error: '',
+  mode: 'sign-in'
 })
 
 const emit = defineEmits<{
-  open: []
-  submit: [credentials: { email: string, password: string }]
+  selectMode: [mode: AuthMode]
+  submit: [credentials: { email: string, password: string, mode: AuthMode, displayName?: string, team?: string }]
 }>()
 
 const email = ref('')
 const password = ref('')
+const displayName = ref('')
+const team = ref(DEFAULT_CATEGORY_NAMES[0])
+const teams = DEFAULT_CATEGORY_NAMES
 const logoUrl = withAppBase(useRuntimeConfig().app.baseURL, '/airgradient-logo.svg')
 
 function submit() {
-  emit('submit', {
+  const base = {
     email: email.value.trim(),
-    password: password.value
+    password: password.value,
+    mode: props.mode
+  }
+  if (props.mode === 'register') {
+    emit('submit', {
+      ...base,
+      displayName: displayName.value.trim(),
+      team: team.value
+    })
+    return
+  }
+  emit('submit', {
+    ...base
   })
 }
 </script>
@@ -40,13 +57,46 @@ function submit() {
     <section class="signin-screen">
       <article class="signin-card">
         <img class="signin-logo" :src="logoUrl" alt="AirGradient">
-        <p class="eyebrow">AirGradient sign in</p>
-        <h2>{{ props.showForm ? 'Sign in to continue' : 'Welcome to the time tracker' }}</h2>
+        <p class="eyebrow">AirGradient account</p>
+        <h2>{{ props.mode === 'sign-in' ? 'Sign in to continue' : 'Create your account' }}</h2>
 
-        <form v-if="props.showForm" class="signin-form" @submit.prevent="submit">
+        <div class="auth-mode-toggle" role="tablist" aria-label="Choose account access">
+          <button
+            type="button"
+            role="tab"
+            :aria-selected="props.mode === 'sign-in'"
+            :class="{ active: props.mode === 'sign-in' }"
+            @click="emit('selectMode', 'sign-in')"
+          >
+            Sign in
+          </button>
+          <button
+            type="button"
+            role="tab"
+            :aria-selected="props.mode === 'register'"
+            :class="{ active: props.mode === 'register' }"
+            @click="emit('selectMode', 'register')"
+          >
+            Register
+          </button>
+        </div>
+
+        <form class="signin-form" @submit.prevent="submit">
           <label>
             Work email
             <input v-model.trim="email" required type="email" autocomplete="email" placeholder="name@airgradient.com">
+          </label>
+          <label v-if="props.mode === 'register'">
+            Name
+            <input v-model.trim="displayName" required type="text" autocomplete="name" placeholder="Your name" maxlength="100">
+          </label>
+          <label v-if="props.mode === 'register'">
+            Team
+            <select v-model="team" required autocomplete="organization-title">
+              <option v-for="teamName in teams" :key="teamName" :value="teamName">
+                {{ teamName }}
+              </option>
+            </select>
           </label>
           <label>
             Password
@@ -54,7 +104,7 @@ function submit() {
               v-model="password"
               required
               type="password"
-              autocomplete="current-password"
+              :autocomplete="props.mode === 'sign-in' ? 'current-password' : 'new-password'"
               placeholder="At least 8 characters"
               minlength="8"
               maxlength="1024"
@@ -62,13 +112,15 @@ function submit() {
             >
           </label>
           <p id="password-help" class="form-help">
-            Use at least 8 characters. New AirGradient work emails will create an account automatically.
+            {{ props.mode === 'sign-in'
+              ? 'Use your existing AirGradient account password (at least 8 characters).'
+              : 'Use at least 8 characters to create an account with your AirGradient work email.' }}
           </p>
           <p v-if="props.error" class="form-error">{{ props.error }}</p>
-          <button type="submit" class="btn primary">Continue</button>
+          <button type="submit" class="btn primary">
+            {{ props.mode === 'sign-in' ? 'Sign in' : 'Create account' }}
+          </button>
         </form>
-
-        <button v-else type="button" class="btn primary signin-primary" @click="emit('open')">Sign in</button>
       </article>
     </section>
   </main>

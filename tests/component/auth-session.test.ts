@@ -40,16 +40,20 @@ describe('SignInPanel', () => {
     expect(wrapper.find('form').exists()).toBe(false)
   })
 
-  it('opens one labelled password form and emits trimmed credentials', async () => {
+  it('renders an accessible mode toggle and emits explicit sign-in credentials', async () => {
     const wrapper = track(await mountSuspended(SignInPanel, {
-      props: { restoring: false, showForm: true, error: '' }
+      props: { restoring: false, error: '' }
     }))
 
+    expect(wrapper.get('[role="tablist"]').attributes('aria-label')).toBe('Choose account access')
+    expect(wrapper.get('[role="tab"][aria-selected="true"]').text()).toBe('Sign in')
     expect(wrapper.findAll('form.signin-form')).toHaveLength(1)
     expect(wrapper.get('input[autocomplete="email"]').attributes('placeholder')).toBe('name@airgradient.com')
+    expect(wrapper.find('input[autocomplete="name"]').exists()).toBe(false)
+    expect(wrapper.find('select[autocomplete="organization-title"]').exists()).toBe(false)
     expect(wrapper.get('input[autocomplete="current-password"]').attributes('placeholder')).toBe('At least 8 characters')
     expect(wrapper.get('input[autocomplete="current-password"]').attributes('minlength')).toBe('8')
-    expect(wrapper.get('#password-help').text()).toContain('Use at least 8 characters')
+    expect(wrapper.get('#password-help').text()).toContain('at least 8 characters')
 
     await wrapper.get('input[autocomplete="email"]').setValue('  mog@airgradient.com  ')
     await wrapper.get('input[autocomplete="current-password"]').setValue('password-123')
@@ -57,16 +61,52 @@ describe('SignInPanel', () => {
 
     expect(wrapper.emitted('submit')).toEqual([[{
       email: 'mog@airgradient.com',
-      password: 'password-123'
+      password: 'password-123',
+      mode: 'sign-in'
     }]])
+  })
+
+  it('switches to registration copy and password semantics', async () => {
+    const wrapper = track(await mountSuspended(SignInPanel, {
+      props: { restoring: false, error: '', mode: 'register' }
+    }))
+
+    expect(wrapper.text()).toContain('Create your account')
+    expect(wrapper.get('[role="tab"][aria-selected="true"]').text()).toBe('Register')
+    expect(wrapper.get('input[autocomplete="name"]').attributes('placeholder')).toBe('Your name')
+    expect(wrapper.findAll('select[autocomplete="organization-title"] option').map(option => option.text())).toEqual([
+      'Software', 'Hardware', 'Firmware', 'Communication', 'Research', 'Commerce', 'Production', 'Other'
+    ])
+    expect(wrapper.get('input[autocomplete="new-password"]').attributes('minlength')).toBe('8')
+    expect(wrapper.get('#password-help').text()).toContain('create an account')
+    expect(button(wrapper, 'Create account').attributes('type')).toBe('submit')
   })
 })
 
 describe('session state', () => {
-  it.each([
-    ['mog@example.com', 'password-123', 'Please use your @airgradient.com email.'],
-    ['mog@airgradient.com', '', 'Please enter your password.']
-  ])('rejects invalid client credentials without calling the session endpoint', async (email, password, message) => {
+  const invalidClientCredentials: Array<{
+    credentials: Parameters<ReturnType<typeof createSession>['submitAuthentication']>[0]
+    message: string
+  }> = [
+    {
+      credentials: { email: 'mog@example.com', password: 'password-123', mode: 'sign-in' },
+      message: 'Please use your @airgradient.com email.'
+    },
+    {
+      credentials: { email: 'mog@airgradient.com', password: '', mode: 'sign-in' },
+      message: 'Please enter your password.'
+    },
+    {
+      credentials: { email: 'mog@airgradient.com', password: 'password-123', mode: 'register', team: 'Software' },
+      message: 'Please enter your name.'
+    },
+    {
+      credentials: { email: 'mog@airgradient.com', password: 'password-123', mode: 'register', displayName: 'Mog' },
+      message: 'Please choose your team.'
+    }
+  ]
+
+  it.each(invalidClientCredentials)('rejects invalid client credentials without calling the session endpoint', async ({ credentials, message }) => {
     const authFetch = vi.fn(async () => createAppFixture())
     const session = createSession({
       authFetch,
@@ -75,7 +115,7 @@ describe('session state', () => {
       onLogout: vi.fn()
     })
 
-    await session.submitSignIn({ email, password })
+    await session.submitAuthentication(credentials)
 
     expect(session.signInError.value).toBe(message)
     expect(authFetch).not.toHaveBeenCalled()
@@ -121,23 +161,18 @@ describe('password session transitions', () => {
     expect(interval).not.toHaveBeenCalled()
   })
 
-  it('opens the single password form with the existing field contract', async () => {
+  it('shows the sign-in form immediately on the signed-out screen', async () => {
     const wrapper = await mountSignedOut()
-
-    expect(wrapper.text()).toContain('Welcome to the time tracker')
-    await button(wrapper, 'Sign in').trigger('click')
 
     expect(wrapper.text()).toContain('Sign in to continue')
     expect(wrapper.get('input[autocomplete="email"]').attributes('placeholder')).toBe('name@airgradient.com')
     expect(wrapper.get('input[autocomplete="current-password"]').attributes('placeholder')).toBe('At least 8 characters')
-    expect(wrapper.get('#password-help').text()).toContain('New AirGradient work emails will create an account automatically.')
+    expect(wrapper.get('#password-help').text()).toContain('existing AirGradient account password')
     expect(wrapper.findAll('form.signin-form')).toHaveLength(1)
   })
 
-  it.each([
-    ['existing user', 'Mog'],
-    ['automatically registered user', 'New Person']
-  ])('accepts a successful %s password response and persists the application session', async (_case, displayName) => {
+  it('accepts a successful existing-user response and persists the application session', async () => {
+    const displayName = 'Mog'
     const signedIn = createAppFixture({
       user: { id: 'u1', email: `${displayName.toLowerCase().replace(' ', '.')}@airgradient.com`, displayName, team: 'Software' },
       sessionToken: `${displayName}-token`
@@ -150,11 +185,51 @@ describe('password session transitions', () => {
     const wrapper = await mountSignedOut(fetchMock)
     await signIn(wrapper, signedIn.user.email, 'password-123')
 
+    const sessionCall = fetchMock.mock.calls.find(([url]) => String(url).endsWith('/api/session'))
+    expect(sessionCall?.[1]).toMatchObject({
+      method: 'POST',
+      body: expect.objectContaining({ mode: 'sign-in' })
+    })
+
     expect(wrapper.text()).toContain('Current Tracking Task')
     expect(wrapper.get('.breezy-copy h2').text()).toBe('Focus in progress')
     expect(wrapper.get('.breezy-panel').attributes('aria-live')).toBe('off')
     expect(wrapper.text()).not.toContain(`Welcome back, ${displayName}.`)
     expect(window.sessionStorage.getItem('breezy-tab-session-token')).toBe(`${displayName}-token`)
+  })
+
+  it('submits an explicit register intent for a new account', async () => {
+    const registered = createAppFixture({
+      user: { id: 'u-new', email: 'new.person@airgradient.com', displayName: 'New Person', team: 'Software' },
+      sessionToken: 'new-person-token'
+    })
+    const fetchMock = vi.fn(async (url: string, options: Record<string, unknown> = {}) => {
+      if (url.endsWith('/api/bootstrap')) throw { statusCode: 401 }
+      if (url.endsWith('/api/session') && options.method === 'POST') return registered
+      throw new Error(`Unexpected request: ${String(options.method || 'GET')} ${url}`)
+    })
+    const wrapper = await mountSignedOut(fetchMock)
+
+    await button(wrapper, 'Register').trigger('click')
+    await wrapper.get('input[autocomplete="email"]').setValue(registered.user.email)
+    await wrapper.get('input[autocomplete="name"]').setValue(registered.user.displayName)
+    await wrapper.get('select[autocomplete="organization-title"]').setValue(registered.user.team)
+    await wrapper.get('input[autocomplete="new-password"]').setValue('password-123')
+    await wrapper.get('form.signin-form').trigger('submit')
+    await flushPromises()
+
+    const sessionCall = fetchMock.mock.calls.find(([url]) => String(url).endsWith('/api/session'))
+    expect(sessionCall?.[1]).toMatchObject({
+      method: 'POST',
+      body: {
+        email: registered.user.email,
+        password: 'password-123',
+        mode: 'register',
+        displayName: 'New Person',
+        team: 'Software'
+      }
+    })
+    expect(wrapper.text()).toContain('Current Tracking Task')
   })
 
   it('keeps the password form open and presents the authoritative sign-in failure', async () => {
@@ -192,7 +267,7 @@ describe('password session transitions', () => {
     await button(wrapper, 'Log out').trigger('click')
     await flushPromises()
 
-    expect(wrapper.text()).toContain('Welcome to the time tracker')
+    expect(wrapper.text()).toContain('Sign in to continue')
     expect(wrapper.text()).not.toContain('Company Dashboard')
     expect(window.sessionStorage.getItem('breezy-tab-session-token')).toBeNull()
     expect(fetchMock).toHaveBeenCalledWith(

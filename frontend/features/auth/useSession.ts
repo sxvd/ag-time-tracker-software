@@ -3,6 +3,15 @@ import type { TrackerFetchOptions } from '~/composables/useTrackerApi'
 import type { ApiState } from '~/types/api'
 import { signInErrorMessage } from '~/utils/auth-error'
 
+export type AuthMode = 'sign-in' | 'register'
+export interface AuthCredentials {
+  email: string
+  password: string
+  mode: AuthMode
+  displayName?: string
+  team?: string
+}
+
 export interface SessionDependencies {
   authFetch: (url: string, options?: TrackerFetchOptions) => Promise<unknown>
   saveTabSessionToken: (token?: string) => void
@@ -13,11 +22,12 @@ export interface SessionDependencies {
 export function createSession(dependencies: SessionDependencies) {
   const isAuthenticated = ref(false)
   const isRestoringSession = ref(true)
-  const showSignIn = ref(false)
   const signInError = ref('')
+  const authMode = ref<AuthMode>('sign-in')
 
-  function openSignIn() {
-    showSignIn.value = true
+  function selectAuthMode(mode: AuthMode) {
+    authMode.value = mode
+    signInError.value = ''
   }
 
   async function restoreSession() {
@@ -27,7 +37,6 @@ export function createSession(dependencies: SessionDependencies) {
       const next = await dependencies.authFetch('/api/bootstrap') as ApiState
       await dependencies.onAuthenticated(next)
       isAuthenticated.value = true
-      showSignIn.value = false
     } catch {
       isAuthenticated.value = false
     } finally {
@@ -35,7 +44,7 @@ export function createSession(dependencies: SessionDependencies) {
     }
   }
 
-  async function submitSignIn(credentials: { email: string, password: string }) {
+  async function submitAuthentication(credentials: AuthCredentials) {
     signInError.value = ''
     if (!credentials.email.toLowerCase().endsWith('@airgradient.com')) {
       signInError.value = 'Please use your @airgradient.com email.'
@@ -44,6 +53,16 @@ export function createSession(dependencies: SessionDependencies) {
     if (!credentials.password) {
       signInError.value = 'Please enter your password.'
       return
+    }
+    if (credentials.mode === 'register') {
+      if (!credentials.displayName?.trim()) {
+        signInError.value = 'Please enter your name.'
+        return
+      }
+      if (!credentials.team?.trim()) {
+        signInError.value = 'Please choose your team.'
+        return
+      }
     }
 
     try {
@@ -54,7 +73,6 @@ export function createSession(dependencies: SessionDependencies) {
       dependencies.saveTabSessionToken(next.sessionToken)
       await dependencies.onAuthenticated(next)
       isAuthenticated.value = true
-      showSignIn.value = false
     } catch (error) {
       signInError.value = signInErrorMessage(error)
     }
@@ -65,7 +83,7 @@ export function createSession(dependencies: SessionDependencies) {
     dependencies.saveTabSessionToken('')
     await dependencies.onLogout()
     isAuthenticated.value = false
-    showSignIn.value = false
+    authMode.value = 'sign-in'
     signInError.value = ''
   }
 
@@ -73,11 +91,11 @@ export function createSession(dependencies: SessionDependencies) {
     isAuthenticated,
     isRestoringSession,
     logout,
-    openSignIn,
+    authMode,
     restoreSession,
-    showSignIn,
+    selectAuthMode,
     signInError,
-    submitSignIn
+    submitAuthentication
   }
 }
 

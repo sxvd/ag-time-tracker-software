@@ -67,7 +67,7 @@ Then open:
 http://localhost:3100/tracker/
 ```
 
-Development and production allow an `@airgradient.com` user to be created automatically on first sign-in. Passwords must contain 8–1,024 characters and are stored only as uniquely salted server-side scrypt hashes. Set `NUXT_ALLOW_SELF_REGISTRATION=false` to restrict sign-in to accounts that already exist in PostgreSQL.
+Development and production show separate `Sign in` and `Register` modes. `Sign in` uses work email and password for an existing account. `Register` creates a missing `@airgradient.com` user only after collecting Name, Team, and password. Team uses the same canonical list as task categories. Passwords must contain 8–1,024 characters and are stored only as uniquely salted server-side scrypt hashes. Set `NUXT_ALLOW_SELF_REGISTRATION=false` to disable new registration while keeping existing-account sign-in available.
 
 ## Docker Development
 
@@ -204,7 +204,7 @@ NITRO_HOST="0.0.0.0"
 NUXT_APP_BASE_URL="/tracker/"
 ```
 
-Production authentication uses the same password flow as development. A missing `@airgradient.com` account is created automatically when self-registration is enabled; an existing account must supply its correct password. Sessions use an HTTP-only cookie and a persisted, hashed session token. `NUXT_SESSION_PASSWORD` must be a unique production secret containing at least 32 characters.
+Production authentication uses the same password flow as development. `Register` creates a missing `@airgradient.com` account when self-registration is enabled, while `Sign in` only accepts an existing account with its correct password. Sessions use an HTTP-only cookie and a persisted, hashed session token. `NUXT_SESSION_PASSWORD` must be a unique production secret containing at least 32 characters.
 
 This password-only flow validates the email domain but does not verify mailbox ownership. Keep the deployment inside the trusted internal access boundary until mailbox verification or a stronger authentication factor is implemented.
 

@@ -4,7 +4,7 @@ Source: extracted from the preserved full brief in `docs/spec.md` and updated to
 
 ## Summary
 
-Authentication lets AirGradient company users create an account on first sign-in, return through a persisted secure session, and maintain their identity and application preferences. A user's Team preference uses the same canonical values as task categories, while dashboard reporting still aggregates by the category attached to each task.
+Authentication lets AirGradient company users explicitly register a new account, sign in to an existing account, return through a persisted secure session, and maintain their identity and application preferences. A user's Team preference uses the same canonical values as task categories, while dashboard reporting still aggregates by the category attached to each task.
 
 ## Users
 
@@ -13,10 +13,13 @@ Authentication lets AirGradient company users create an account on first sign-in
 
 ## Scope
 
-- Use one email-and-password form for sign-in and automatic first-time registration.
+- Present the authentication form immediately on first load with a visible `Sign in` / `Register` toggle on the authentication card.
+- Use the same work-email and password fields in both modes while sending an explicit authentication intent to the server.
+- In `Register` mode, also collect `Name` and `Team`; Team is a dropdown backed by the canonical work-category list.
 - Accept only email addresses ending in the exact `@airgradient.com` domain.
 - Require passwords from 8 through 1,024 characters for both registration and sign-in.
-- Create a missing company-email account when `NUXT_ALLOW_SELF_REGISTRATION=true`.
+- Create a missing company-email account only from `Register` mode and only when `NUXT_ALLOW_SELF_REGISTRATION=true`.
+- Never create an account from `Sign in` mode.
 - Hash every password server-side with scrypt and a unique random salt.
 - Persist signed-in state through a server-managed application session.
 - Sign out by revoking the persisted session.
@@ -58,14 +61,15 @@ Sign Up / Sign In:
 +---------------------------------------------------------------+
 ```
 
-Implementation note: the approved flow replaces the two visible Sign Up / Sign In paths with one email-and-password form. A missing `@airgradient.com` account is created automatically when self-registration is enabled. Display name and Team remain editable from Settings. Team uses the canonical work-category list: Software, Hardware, Firmware, Communication, Research, Commerce, Production, Other.
+Current target: the signed-out `/tracker/` view opens directly to the account card with a two-option segmented toggle above one form. `Sign in` authenticates existing users with work email and password only. `Register` adds `Name` and `Team`, then creates a missing `@airgradient.com` account when self-registration is enabled. Display name and Team remain editable from Settings. Team uses the canonical work-category list: Software, Hardware, Firmware, Communication, Research, Commerce, Production, Other.
 
-The authentication UI has one path:
+The authentication UI has two explicit paths:
 
-1. Enter an AirGradient work email and password.
-2. If the account exists, verify its salted password hash.
-3. If the account does not exist and self-registration is enabled, create it with a derived display name and a salted password hash. Until the legacy database column is removed, the backend may populate its required compatibility value without exposing or using it for reporting.
-4. Establish the same persisted application session in either case.
+1. Choose `Sign in` for an existing account or `Register` for a new account.
+2. Enter an AirGradient work email and password. In `Register` mode, also enter Name and choose Team.
+3. In `Sign in` mode, verify the existing account's salted password hash and return a generic credential error when the account is missing or the password is wrong.
+4. In `Register` mode, create a missing account with the submitted Name, selected Team, and salted password hash when registration is enabled. If the account already exists, direct the user back to `Sign in`.
+5. Establish the same persisted application session after either successful path.
 
 Safe validation messages may identify input-policy failures, including the company-email rule and the 8-character minimum. Credential failures for an existing account use the generic `Invalid email or password.` message. Unknown server details must not be rendered in the UI.
 
@@ -79,7 +83,8 @@ After authentication, the entire sidebar profile card is the account trigger. It
 - Accept passwords of at least 64 characters.
 - Never store or log plaintext passwords.
 - Store password hashes in `scrypt$<salt>$<derived-key>` form with a new salt for every hash.
-- Allow production account creation only when `NUXT_ALLOW_SELF_REGISTRATION` explicitly evaluates to `true` or `1`.
+- Allow production account creation only for an explicit `Register` request and when `NUXT_ALLOW_SELF_REGISTRATION` evaluates to `true` or `1`.
+- Require a non-empty Name of at most 100 characters and a valid canonical Team for registration.
 - Keep signed-in state across refreshes.
 - Store only a SHA-256 hash of the signed session token in PostgreSQL.
 - Set the browser session cookie as HTTP-only, `SameSite=Lax`, path `/`, and secure when served through HTTPS.
@@ -114,9 +119,9 @@ Relevant implementation files:
 
 ## Current Implementation
 
-- Development and production Compose enable automatic company-email registration.
-- `backend/api/session.post.ts` applies the domain and password policy before account lookup.
-- Missing users are created through Prisma with a salted scrypt hash.
+- Development and production Compose permit explicit company-email registration.
+- `backend/api/session.post.ts` applies the domain, password, and authentication-mode policy before account lookup.
+- Missing users are created through Prisma with the submitted Name, selected canonical Team, and a salted scrypt hash only for `Register` requests.
 - Existing users are authenticated with a timing-safe password comparison.
 - Session tokens are HMAC-signed, stored in the HTTP-only `breezy_session` cookie, and represented in PostgreSQL by a token hash.
 - `requireSessionUser` and `requireSessionIdentity` enforce protected API access.
@@ -138,7 +143,9 @@ Current target: keep Team in account settings, but keep its allowed values align
 
 ## Acceptance Criteria
 
-- A missing `@airgradient.com` user can submit a password of at least 8 characters and receive a persisted account and session when self-registration is enabled.
+- A missing `@airgradient.com` user can select `Register`, submit Name, Team, and a password of at least 8 characters, and receive a persisted account and session when self-registration is enabled.
+- Submitting the same missing account through `Sign in` does not create it and returns a generic credential error.
+- Registering an existing account does not sign it in and directs the user to the `Sign in` mode.
 - A seven-character password is rejected before account lookup.
 - An existing user can sign in with the correct password and refresh without losing the session.
 - Wrong credentials return a safe generic error.
