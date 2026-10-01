@@ -240,7 +240,92 @@ Relevant files:
 - Register collects Name and Team up front.
 - The app uses password auth only for now; mailbox verification and password reset are deferred.
 
-## 7. Local Setup
+## 7. Workflow Sequence Diagrams
+
+These diagrams show the current expected behavior at a handoff level. Keep them aligned when the corresponding product flow changes.
+
+### Register Or Sign In
+
+```mermaid
+sequenceDiagram
+  actor User
+  participant UI as SignInPanel
+  participant Session as useSession
+  participant API as POST /api/session
+  participant DB as PostgreSQL
+
+  User->>UI: Choose Sign in or Register
+  UI->>Session: Submit email, password, mode
+  alt Register
+    UI->>Session: Include name and team
+    Session->>API: POST credentials + name + team
+    API->>DB: Validate missing company user
+    API->>DB: Create user with salted password hash
+  else Sign in
+    Session->>API: POST credentials
+    API->>DB: Find existing user
+    API->>API: Verify password hash
+  end
+  API->>DB: Store hashed session token
+  API-->>Session: Return public state + tab token
+  Session-->>UI: Load authenticated workspace
+```
+
+### Track Time And Save Feedback
+
+```mermaid
+sequenceDiagram
+  actor User
+  participant Track as Track Page
+  participant Timer as Timer API
+  participant DB as PostgreSQL
+  participant Feedback as Feedback Modal
+  participant Dashboard as Dashboards/Journey
+
+  User->>Track: Select task and category
+  User->>Track: Start timer
+  Track->>Timer: POST /api/timer-start
+  Timer->>DB: Create active time entry
+  User->>Track: Pause or resume as needed
+  Track->>Timer: POST pause/resume decision
+  Timer->>DB: Persist pause or activity state
+  User->>Track: Stop timer
+  Track->>Feedback: Show quick check-in
+  User->>Feedback: Save flow, energy, blockers, note
+  Feedback->>Timer: POST stop + feedback payload
+  Timer->>DB: Close entry and persist feedback/blockers
+  Timer->>Dashboard: Refresh derived public state
+  Dashboard-->>Track: Today's entries, dashboards, Work Journey update
+```
+
+### Shared Team Task Invite And Tracking
+
+```mermaid
+sequenceDiagram
+  actor Owner
+  actor Teammate
+  participant UI as Track Page
+  participant API as Task/Invite APIs
+  participant DB as PostgreSQL
+  participant Timer as Timer API
+
+  Owner->>UI: Create New team task
+  UI->>API: POST task with selected teammate IDs
+  API->>DB: Create task, owner membership, pending invites
+  API-->>UI: Owner sees task under Team entries
+  API-->>Teammate: Invitation appears on teammate bootstrap
+  Teammate->>UI: Click Join
+  UI->>API: Accept invitation
+  API->>DB: Upsert teammate membership
+  API-->>UI: Task appears under Team entries
+  Teammate->>UI: Click Track task
+  UI-->>UI: Load task into timer draft only
+  Teammate->>Timer: Start timer when ready
+  Timer->>DB: Create teammate-owned time entry
+  Timer-->>UI: Team row shows My time spent only
+```
+
+## 8. Local Setup
 
 From the project checkout:
 
@@ -279,7 +364,7 @@ If port 3000 is already used:
 npm run dev -- --port 3100
 ```
 
-## 8. Production Setup And Deployment
+## 9. Production Setup And Deployment
 
 Production is served at:
 
@@ -315,7 +400,7 @@ Important production note:
 - If a production user can sign in but sees empty dashboards, check whether that production user has production tasks and entries.
 - Local seed data and test fixtures do not appear in production automatically.
 
-## 9. Production DB Checks
+## 10. Production DB Checks
 
 Run these only after SSHing into the production server and entering the production checkout.
 
@@ -343,7 +428,7 @@ docker compose -f docker-compose.prod.yml --env-file .env.production exec postgr
 
 Never expose `.env.production`, `DATABASE_URL`, `POSTGRES_PASSWORD`, `NUXT_SESSION_PASSWORD`, production backups, or raw production exports.
 
-## 10. Testing Checklist
+## 11. Testing Checklist
 
 Fast useful checks:
 
@@ -373,7 +458,7 @@ Useful manual/browser flows:
 - Check Work Journey segment selection/details.
 - Check Settings profile/team update.
 
-## 11. Known Gaps And Deferred Work
+## 12. Known Gaps And Deferred Work
 
 Keep `docs/milestones.md` as the source of truth for milestone status. Current important gaps include:
 
@@ -389,7 +474,7 @@ Keep `docs/milestones.md` as the source of truth for milestone status. Current i
 - Automated accessibility scanning and full Playwright E2E remain open.
 - Production dependency audit remains blocked by known Prisma-chain high findings recorded in `docs/milestones.md`.
 
-## 12. Privacy And Data Notes
+## 13. Privacy And Data Notes
 
 - Individuals can see/export their own detailed raw data.
 - Company surfaces must remain aggregate.
@@ -398,7 +483,7 @@ Keep `docs/milestones.md` as the source of truth for milestone status. Current i
 - Do not add destination URLs, app names, website names, screenshots, or private activity detail.
 - API routes must enforce authenticated access and task membership/ownership rules server-side.
 
-## 13. Open Questions For The Next Owner
+## 14. Open Questions For The Next Owner
 
 - Should production get a small admin-only data inspection surface, or should DB inspection remain server-only?
 - Should registration remain open to all `@airgradient.com` addresses, or move to invite-only/mailbox verification?

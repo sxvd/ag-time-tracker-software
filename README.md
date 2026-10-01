@@ -8,6 +8,31 @@ AirGradient Time Tracker is a Nuxt 3, Vue 3, TypeScript, PostgreSQL, and Prisma 
 
 Runtime data is persisted through backend API routes backed by PostgreSQL. Local development data, test data, and production data are separate databases.
 
+## User Workflow Overview
+
+The app's main user flow is simple: sign in, choose work, track time, save a short reflection, then review the record.
+
+```mermaid
+flowchart LR
+  A[Sign in or register] --> B[Track page]
+  B --> C[Create or join a task]
+  C --> D[Track time]
+  D --> E[Save feedback and blockers]
+  E --> F[Review Today's entries]
+  F --> G[Personal dashboard]
+  F --> H[Work Journey]
+  F --> I[CSV export]
+  G --> J[Company dashboard shows aggregate insight]
+```
+
+Important workflow rules:
+
+- A Team task is collaborative, but each person tracks only their own time.
+- Joining a Team task does not start tracking automatically.
+- Personal dashboard and CSV export are private to the signed-in user.
+- Company dashboard uses aggregated process insight and must not rank individuals.
+- Context switching stores counts only, not app names, website names, URLs, or screenshots.
+
 ## Getting Started
 
 ### Dependencies
