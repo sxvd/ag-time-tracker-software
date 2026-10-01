@@ -1,39 +1,42 @@
 # AirGradient Time Tracker
 
-Internal time tracking for AirGradient teams, with personal raw-data ownership and company-level aggregate insight.
+Internal time tracking for AirGradient teams. The app helps each person keep a private, exportable record of their own work time, feedback, blockers, and work patterns while giving the company aggregate process insight without individual performance ranking.
 
 ## Description
 
-AirGradient Time Tracker helps AirGradient employees and freelancers track tasks, record work sessions, capture feedback and blockers, review personal weekly patterns, and inspect company-level process signals without ranking individuals. The app is built with Nuxt 3, Vue 3, TypeScript, PostgreSQL, and Prisma. Runtime data is persisted through backend API routes, while the frontend is split into feature-focused modules for tracking, tasks, dashboards, Breezy, settings, and account workflows.
+AirGradient Time Tracker is a Nuxt 3, Vue 3, TypeScript, PostgreSQL, and Prisma application. It supports password-based AirGradient account access, timer tracking, manual entries, feedback and blockers, shared team tasks, personal and company dashboards, Work Journey, Breezy nudges, medals, settings, and CSV export.
+
+Runtime data is persisted through backend API routes backed by PostgreSQL. Local development data, test data, and production data are separate databases.
 
 ## Getting Started
 
 ### Dependencies
 
 - Node.js 20+.
-- Docker Desktop, used for the local PostgreSQL database.
 - npm, using the committed `package-lock.json`.
-- PostgreSQL connection details in a local `.env` file.
+- Docker Desktop for the local PostgreSQL database.
+- A local `.env` file copied from `.env.example`.
 
 ### Installing
 
-From this worktree:
+Clone or pull the repository, then enter the project checkout:
 
 ```bash
-cd /Users/Ananya/Developer/ag-time-tracker-software/.worktrees/backend-database-hardening
+cd ag-time-tracker-software
 npm install
 cp .env.example .env
 ```
 
-Confirm `.env` includes the local database and session settings:
+Confirm `.env` includes local database and session settings:
 
 ```dotenv
 DATABASE_URL="postgresql://postgres:postgres@localhost:5432/ag_time_tracker?schema=public"
 NUXT_SESSION_PASSWORD="local-dev-session-secret-32-characters"
 NUXT_ALLOW_SELF_REGISTRATION="true"
+NUXT_APP_BASE_URL="/tracker/"
 ```
 
-### Executing Program
+### Running Locally With DB
 
 Start PostgreSQL, apply migrations, seed demo data, and run the Nuxt dev server:
 
@@ -50,12 +53,21 @@ Open:
 http://localhost:3000/tracker/
 ```
 
-Sign in with the seeded demo user:
+Seeded demo users:
 
-- Email: `siri@airgradient.com`
-- Password: `demo-password`
+```text
+siri@airgradient.com
+jack@airgradient.com
+jay@airgradient.com
+```
 
-If port `3000` is already in use, run the web app on another port:
+Password:
+
+```text
+demo-password
+```
+
+If port `3000` is already in use:
 
 ```bash
 npm run dev -- --port 3100
@@ -67,11 +79,119 @@ Then open:
 http://localhost:3100/tracker/
 ```
 
-Development and production show separate `Sign in` and `Register` modes. `Sign in` uses work email and password for an existing account. `Register` creates a missing `@airgradient.com` user only after collecting Name, Team, and password. Team uses the same canonical list as task categories. Passwords must contain 8–1,024 characters and are stored only as uniquely salted server-side scrypt hashes. Set `NUXT_ALLOW_SELF_REGISTRATION=false` to disable new registration while keeping existing-account sign-in available.
+## Account Flow
+
+The signed-out page opens directly to the account card.
+
+- `Sign in` is for existing accounts and asks for work email and password.
+- `Register` creates a missing `@airgradient.com` account when self-registration is enabled.
+- Register asks for work email, name, team, and password.
+- Team uses the same canonical list as task categories: Software, Hardware, Firmware, Communication, Research, Commerce, Production, Other.
+- Passwords must contain 8-1,024 characters.
+- Passwords are stored only as salted server-side scrypt hashes.
+- `Sign in` never creates a missing account.
+- Set `NUXT_ALLOW_SELF_REGISTRATION=false` to disable new account registration while keeping existing-account sign-in available.
+
+This password-only flow validates the email domain but does not verify mailbox ownership. Keep production inside the trusted internal access boundary until mailbox verification or a stronger authentication factor is added.
+
+## Main User Workflow
+
+1. Sign in or register with an `@airgradient.com` account.
+2. Create an individual task inline, or create a shared task from `New team task`.
+3. Choose a category/team area such as Software, Hardware, Firmware, Communication, Research, Commerce, Production, or Other.
+4. Start, pause, resume, and stop the timer.
+5. Review inactive time if the app detects a gap.
+6. Stop the timer and optionally add feedback, blockers, and a note.
+7. Review `Today's entries`.
+8. Add a manual entry for work tracked after the fact.
+9. Open Personal dashboard for weekly personal hours, work overview, work signals, blockers, medals, and CSV export.
+10. Open Company dashboard for aggregate category-level process insight.
+11. Open Work Journey to revisit completed tasks across the selected week.
+
+## Shared Task Workflow
+
+Shared work is represented as Team tasks.
+
+- `New team task` requires selecting at least one existing teammate.
+- Creating a Team task does not start the timer.
+- A Team task appears for the owner under `Today's entries` -> `Team`.
+- Invitees see a task invitation notification and can choose `Join`.
+- Joining a task adds it to the user's Team entries but still does not start the timer.
+- `Track task` loads the Team task into the timer draft.
+- Before tracking starts, `Cancel` clears that draft.
+- Each person tracks only their own time on the shared task.
+- Team task rows show members and `My time spent`, not other members' durations.
+
+## Dashboard And Reporting
+
+Personal dashboard is private to the signed-in user and focuses on that user's work record.
+
+- Weekly hours and work overview.
+- Customizable metric/grouping chart.
+- Work signals from saved feedback.
+- Blocker patterns.
+- Medals.
+- CSV export.
+
+Company dashboard is aggregate and process-focused.
+
+- It must not rank people.
+- It must not expose personal raw entries.
+- It should use category/team-level rollups and shared-task aggregate signals.
+
+Work Journey is a weekly timeline of completed work entries. It is designed to help the user review what they completed, how time was distributed across the week, and the feedback/blocker context attached to each entry.
+
+## Production Data Note
+
+Production data is not the same as local seed data or test fixtures.
+
+- `npm run db:seed` is for local/demo development only.
+- Production deploy runs migrations but does not seed demo tasks and entries automatically.
+- A production account can exist and still show empty dashboards if that user has not tracked work in production.
+- Test fixture names such as `Mog` may exist in tests or local data without existing in production, unless that account was created in the production database.
+
+To inspect production data, connect to the production server first. The production `.env.production` file and PostgreSQL Docker volume live on that server, not in the local worktree.
+
+## Useful Local Commands
+
+Check local containers:
+
+```bash
+docker compose -p ag-time-tracker-software -f docker-compose.dev.yml ps
+```
+
+Check local API health:
+
+```bash
+curl http://localhost:3000/tracker/api/health
+```
+
+Seed local demo data:
+
+```bash
+npm run db:seed
+```
+
+Stop local development containers:
+
+```bash
+docker compose -p ag-time-tracker-software -f docker-compose.dev.yml down
+```
+
+Run checks:
+
+```bash
+npm run test
+npm run test:component
+npm run test:integration
+npm run lint
+npm run build
+docker compose -f docker-compose.prod.yml --env-file .env.example config
+```
 
 ## Docker Development
 
-Start PostgreSQL and the Nuxt dev server through Docker:
+Run PostgreSQL and the Nuxt dev server through Docker:
 
 ```bash
 docker compose -p ag-time-tracker-software -f docker-compose.dev.yml up --build web
@@ -83,61 +203,30 @@ Seed the Docker development database:
 docker compose -p ag-time-tracker-software -f docker-compose.dev.yml exec web npm run db:seed
 ```
 
-Run the test suite inside Docker:
+Run tests inside Docker:
 
 ```bash
 docker compose -p ag-time-tracker-software -f docker-compose.dev.yml run --rm test
 ```
 
-Stop the Docker development containers:
-
-```bash
-docker compose -p ag-time-tracker-software -f docker-compose.dev.yml down
-```
-
-## Help
-
-Check that the local database container is running:
-
-```bash
-docker compose -p ag-time-tracker-software -f docker-compose.dev.yml ps
-```
-
-Check that the API can reach PostgreSQL:
-
-```bash
-curl http://localhost:3000/api/health
-```
-
-If login fails and the API reports `Environment variable not found: DATABASE_URL`, the Nuxt dev server is running without the local `.env` loaded. Stop the dev server, confirm `.env` exists in this worktree, then start `npm run dev` again.
-
-If you see Docker container-name or port conflicts, stop duplicate dev services and keep one Compose project name:
-
-```bash
-docker compose -p ag-time-tracker-software -f docker-compose.dev.yml down
-docker compose -p ag-time-tracker-software -f docker-compose.dev.yml up -d postgres
-```
-
-The app uses PostgreSQL through Prisma for runtime persistence. The Prisma seed script populates demo users, tasks, entries, feedback, blockers, dashboards, Work Journey data, and medals.
-
 ## Project Structure
 
 ```text
 backend/
-  api/         Nuxt/Nitro API routes for auth, timer, entries, dashboards, export, and sharing
+  api/         Nitro API routes for auth, timer, tasks, entries, dashboards, export, and sharing
   prisma/      Prisma schema, migrations, and seed data
-  utils/       Auth, validation, DB store, timer activity, and dashboard logic
+  utils/       Auth, validation, DB store, timer activity, dashboard, and account helpers
 
 frontend/
   app.vue      App shell, navigation, and high-level workflow coordination
-  features/    Feature UI modules for auth, tracking, tasks, dashboards, Breezy, settings
+  features/    Feature UI modules for auth, tracking, tasks, dashboards, Breezy, settings, and export
   components/  Shared UI components such as charts and modals
   composables/ Frontend API/session/theme helpers
   assets/      Main CSS theme and layout styles
-  public/      Logo and mascot assets
+  public/      Logo and Breezy assets
 
 shared/
-  constants/   Shared category constants
+  constants/   Shared category/team and settings constants
   types/       Shared TypeScript domain types
   utils/       Shared time, URL, theme, and Breezy helpers
 
@@ -154,44 +243,54 @@ tests/
 scripts/       Production/config helper scripts
 ```
 
-## Checks
+## Feature Specs
+
+Feature behavior is documented in `docs/specs/features/`.
+
+Key files for the current product surface:
+
+- `01-authentication-profile.spec.md`
+- `02-tasks-categories-collaboration.spec.md`
+- `03-timer-tracking-entries.spec.md`
+- `04-feedback-blockers.spec.md`
+- `05-idle-context-settings.spec.md`
+- `06-personal-dashboard.spec.md`
+- `07-company-dashboard.spec.md`
+- `08-breezy-companion.spec.md`
+- `09-breezy-journey.spec.md`
+- `10-medals.spec.md`
+- `11-raw-data-export.spec.md`
+- `13-data-persistence-audit.spec.md`
+- `14-accessibility-verification.spec.md`
+
+Read the relevant feature spec before changing behavior in that area.
+
+## Troubleshooting
+
+If login fails with `Environment variable not found: DATABASE_URL`, the Nuxt dev server is running without the local `.env` loaded. Stop the server, confirm `.env` exists in this worktree, then start `npm run dev` again.
+
+If Docker reports a container-name or port conflict, stop duplicate dev services and keep one Compose project name:
 
 ```bash
-npm run test
-npm run test:component
-npm run test:integration
-npm run lint
-npm run build
-docker compose -p ag-time-tracker-software -f docker-compose.dev.yml run --rm test
-docker compose -f docker-compose.prod.yml --env-file .env.example config
+docker compose -p ag-time-tracker-software -f docker-compose.dev.yml down
+docker compose -p ag-time-tracker-software -f docker-compose.dev.yml up -d postgres
 ```
 
-## Demo Workflow
+If the app loads but the page does not respond to clicks during local testing, restart the Nuxt dev server. Running `nuxt prepare`, tests, or type generation while the dev server is active can regenerate `.nuxt` and leave the browser on an old dev bundle.
 
-1. Sign in as `siri@airgradient.com`.
-2. Create or select a task.
-3. Choose a category such as Software, Hardware, Firmware, Communication, Research, Commerce, Production, or Other.
-4. Start the timer and watch Breezy reflect the current work state.
-5. Pause, resume, or handle inactive time if needed.
-6. Stop the timer, then optionally add feedback and blockers.
-7. Review Today's entries and confirm the saved session appears.
-8. Add a Manual entry if work was tracked after the fact.
-9. Open Personal dashboard to review the selected week's hours, work overview, work signals, blockers, medals, and CSV export.
-10. Open Company dashboard to review aggregated category-level insights without individual ranking.
-11. Open Work Journey to revisit completed tasks across the selected week.
-12. Export CSV from the Personal dashboard header.
+If production sign-in works but dashboards are empty, check whether that production user has production tasks and entries. Local seed data and test fixture data do not appear in production automatically.
 
-## Docker Production Deployment
+## Production Deployment
 
-The AirGradient tools host deploys the app below:
+The AirGradient tools host serves:
 
 ```text
 https://tools.airgradient.net/tracker
 ```
 
-Production Compose starts its own PostgreSQL container and keeps data in the `postgres_data` Docker volume. The deploy script creates a server-only `.env.production` with generated secrets on first run, so do not commit that file.
+Production Compose runs its own PostgreSQL container and stores data in the `postgres_data` Docker volume. The deploy script creates a server-only `.env.production` with generated secrets on first run. Do not commit `.env.production`.
 
-Optional `.env.production` overrides:
+Expected production environment values:
 
 ```dotenv
 POSTGRES_DB="ag_time_tracker"
@@ -204,26 +303,44 @@ NITRO_HOST="0.0.0.0"
 NUXT_APP_BASE_URL="/tracker/"
 ```
 
-Production authentication uses the same password flow as development. `Register` creates a missing `@airgradient.com` account when self-registration is enabled, while `Sign in` only accepts an existing account with its correct password. Sessions use an HTTP-only cookie and a persisted, hashed session token. `NUXT_SESSION_PASSWORD` must be a unique production secret containing at least 32 characters.
-
-This password-only flow validates the email domain but does not verify mailbox ownership. Keep the deployment inside the trusted internal access boundary until mailbox verification or a stronger authentication factor is implemented.
-
-Before first deployment, confirm the shared Docker network exists:
-
-```bash
-docker network ls
-```
-
-The tools host Nginx route should proxy `/tracker` to:
-
-```text
-http://tracker:5500
-```
-
-Every production migration and deployment must follow the [mandatory production runbook](docs/operations/production-runbook.md). Production automation pulls the latest fast-forward update from `main`, creates a unique timestamped image, and deploys it after the required backup and migration gates. Keep `main` protected so only reviewed, tested changes can trigger production deployment.
-
-The production scheduler invokes the deployment script from `/opt/apps/tracker` without requiring a manually supplied Git SHA:
+The production scheduler invokes the deployment script from the production checkout. The script pulls the latest fast-forward `main`, builds a uniquely timestamped image, runs Prisma migrations, and starts the web container:
 
 ```bash
 ./deploy.sh
 ```
+
+The Docker build runs `npm run verify:production` inside the build container, so the production server does not need Node.js or npm installed for deployment.
+
+Every production migration and deployment must follow `docs/operations/production-runbook.md`. The runbook covers backups, migration status, health checks, rollback, and isolated restore.
+
+## Production DB Checks
+
+Run production DB checks only after SSHing into the production server and entering the production checkout. The default runbook path is:
+
+```bash
+cd /opt/apps/tracker
+```
+
+Confirm services:
+
+```bash
+docker compose -f docker-compose.prod.yml --env-file .env.production ps
+```
+
+Check known users without printing secrets:
+
+```bash
+docker compose -f docker-compose.prod.yml --env-file .env.production exec postgres \
+  psql -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DB:-ag_time_tracker}" \
+  -c "select email, display_name, team, created_at from users order by created_at desc limit 20;"
+```
+
+Check whether a user has production tasks and entries:
+
+```bash
+docker compose -f docker-compose.prod.yml --env-file .env.production exec postgres \
+  psql -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DB:-ag_time_tracker}" \
+  -c "select u.email, count(distinct t.id) as tasks, count(distinct e.id) as entries from users u left join tasks t on t.owner_id = u.id left join time_entries e on e.user_id = u.id where u.email ilike '%mog%' group by u.email;"
+```
+
+Never paste `.env.production`, database passwords, session secrets, or raw production exports into chat, tickets, or logs.
